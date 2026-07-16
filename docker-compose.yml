@@ -36,11 +36,6 @@ services:
       - "9001:9001"
     volumes:
       - minio_data:/data
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
-      interval: 5s
-      timeout: 5s
-      retries: 10
 
   minio-init:
     image: minio/mc:latest
@@ -59,11 +54,8 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile
-    command: >
-      sh -c "python manage.py migrate --noinput &&
-             python manage.py runserver 0.0.0.0:8000"
+    command: ["/app/hover", "-mode", "all"]
     volumes:
-      - ./backend:/app
       - extracted_data:/app/extracted
       - media_data:/app/media
     ports:
@@ -71,13 +63,15 @@ services:
     env_file:
       - .env
     environment:
-      POSTGRES_HOST: postgres
-      CELERY_BROKER_URL: redis://redis:6379/0
-      CELERY_RESULT_BACKEND: redis://redis:6379/0
-      AWS_S3_ENDPOINT_URL: http://minio:9000
+      HOVER_ADDR: ":8000"
       USE_SQLITE: "false"
       USE_LOCAL_STORAGE: "false"
-      CELERY_TASK_ALWAYS_EAGER: "false"
+      WORKER_EAGER: "false"
+      POSTGRES_HOST: postgres
+      REDIS_URL: redis://redis:6379/0
+      AWS_S3_ENDPOINT_URL: http://minio:9000
+      MEDIA_ROOT: /app/media
+      EXTRACT_ROOT: /app/extracted
     depends_on:
       postgres:
         condition: service_healthy
@@ -90,28 +84,26 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile
-    command: celery -A config worker -l info
+    command: ["/app/hover", "-mode", "worker"]
     volumes:
-      - ./backend:/app
       - extracted_data:/app/extracted
       - media_data:/app/media
     env_file:
       - .env
     environment:
-      POSTGRES_HOST: postgres
-      CELERY_BROKER_URL: redis://redis:6379/0
-      CELERY_RESULT_BACKEND: redis://redis:6379/0
-      AWS_S3_ENDPOINT_URL: http://minio:9000
       USE_SQLITE: "false"
       USE_LOCAL_STORAGE: "false"
-      CELERY_TASK_ALWAYS_EAGER: "false"
+      WORKER_EAGER: "false"
+      POSTGRES_HOST: postgres
+      REDIS_URL: redis://redis:6379/0
+      AWS_S3_ENDPOINT_URL: http://minio:9000
+      MEDIA_ROOT: /app/media
+      EXTRACT_ROOT: /app/extracted
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
-      minio:
-        condition: service_started
       web:
         condition: service_started
 
