@@ -152,9 +152,27 @@ EXTRACT_ROOT.mkdir(parents=True, exist_ok=True)
 MAX_ZIP_BYTES = int(os.getenv("MAX_ZIP_BYTES", str(200 * 1024 * 1024)))
 MAX_EXTRACTED_FILES = int(os.getenv("MAX_EXTRACTED_FILES", "5000"))
 
-# OpenAI-compatible LLM / embeddings
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
-OPENAI_BASE_URL = os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1")
-OPENAI_EMBEDDING_MODEL = os.getenv("OPENAI_EMBEDDING_MODEL", "text-embedding-3-small")
-OPENAI_CHAT_MODEL = os.getenv("OPENAI_CHAT_MODEL", "gpt-4o-mini")
+# LLM / embeddings via OpenRouter (OpenAI-compatible SDK)
+# Prefer OPENROUTER_API_KEY; OPENAI_API_KEY kept as fallback alias.
+LLM_API_KEY = os.getenv("OPENROUTER_API_KEY") or os.getenv("OPENAI_API_KEY", "")
+LLM_BASE_URL = os.getenv(
+    "OPENROUTER_BASE_URL",
+    os.getenv("OPENAI_BASE_URL", "https://openrouter.ai/api/v1"),
+)
+LLM_CHAT_MODEL = os.getenv(
+    "OPENROUTER_CHAT_MODEL",
+    os.getenv("OPENAI_CHAT_MODEL", "openai/gpt-4o-mini"),
+)
+LLM_EMBEDDING_MODEL = os.getenv(
+    "OPENROUTER_EMBEDDING_MODEL",
+    os.getenv("OPENAI_EMBEDDING_MODEL", "openai/text-embedding-3-small"),
+)
 EMBEDDING_DIM = int(os.getenv("EMBEDDING_DIM", "1536"))
+OPENROUTER_HTTP_REFERER = os.getenv("OPENROUTER_HTTP_REFERER", "http://localhost:5173")
+OPENROUTER_APP_TITLE = os.getenv("OPENROUTER_APP_TITLE", "Hover")
+
+# Back-compat aliases used by older code paths
+OPENAI_API_KEY = LLM_API_KEY
+OPENAI_BASE_URL = LLM_BASE_URL
+OPENAI_CHAT_MODEL = LLM_CHAT_MODEL
+OPENAI_EMBEDDING_MODEL = LLM_EMBEDDING_MODEL

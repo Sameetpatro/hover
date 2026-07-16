@@ -310,11 +310,12 @@ def _extract_json(text: str) -> dict | None:
 
 
 def llm_architecture(project, retrieved: list[dict], base: dict) -> dict | None:
-    if not settings.OPENAI_API_KEY:
-        return None
-    from openai import OpenAI
+    from config.llm import get_openai_client, llm_configured
 
-    client = OpenAI(api_key=settings.OPENAI_API_KEY, base_url=settings.OPENAI_BASE_URL)
+    if not llm_configured():
+        return None
+
+    client = get_openai_client()
     context = "\n\n".join(
         f"FILE: {r['path']} ({r.get('symbol')})\n{r['content']}" for r in retrieved[:10]
     )
@@ -331,7 +332,7 @@ RETRIEVED CODE:
 {context[:12000]}
 """
     resp = client.chat.completions.create(
-        model=settings.OPENAI_CHAT_MODEL,
+        model=settings.LLM_CHAT_MODEL,
         messages=[
             {"role": "system", "content": "You output only valid JSON."},
             {"role": "user", "content": prompt},
