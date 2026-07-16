@@ -1,0 +1,144 @@
+.viz-page {
+  position: relative;
+  width: 100vw;
+  height: 100vh;
+  overflow: hidden;
+  background: #020617;
+}
+
+.viz-canvas {
+  position: absolute;
+  inset: 0;
+}
+
+.viz-canvas canvas {
+  width: 100% !important;
+  height: 100% !important;
+}
+
+.viz-empty {
+  height: 100%;
+  display: grid;
+  place-items: center;
+  color: #94a3b8;
+  font-family: Syne, sans-serif;
+  font-size: 1.4rem;
+}
+
+.viz-chrome {
+  position: absolute;
+  top: 1.25rem;
+  left: 1.25rem;
+  width: min(320px, calc(100vw - 2rem));
+  padding: 1.1rem 1.15rem 1.25rem;
+  border-radius: 16px;
+  background: linear-gradient(160deg, rgba(8, 20, 28, 0.82), rgba(2, 6, 23, 0.72));
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  backdrop-filter: blur(10px);
+  z-index: 2;
+  animation: chrome-in 0.8s ease both;
+}
+
+.brand-mini {
+  font-family: Syne, sans-serif;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  font-size: 0.85rem;
+  color: #5eead4;
+}
+
+.viz-chrome h1 {
+  font-family: Syne, sans-serif;
+  font-size: 1.35rem;
+  margin: 0.65rem 0 0.35rem;
+  line-height: 1.15;
+}
+
+.summary {
+  margin: 0;
+  color: #94a3b8;
+  font-size: 0.86rem;
+  line-height: 1.45;
+}
+
+.flow-picker {
+  display: grid;
+  gap: 0.4rem;
+  margin-top: 1rem;
+}
+
+.flow-picker .label {
+  font-size: 0.7rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #64748b;
+}
+
+.flow {
+  text-align: left;
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  background: rgba(15, 23, 42, 0.55);
+  color: #e2e8f0;
+  border-radius: 10px;
+  padding: 0.55rem 0.7rem;
+  font: inherit;
+  cursor: pointer;
+}
+
+.flow.active {
+  border-color: rgba(251, 191, 36, 0.7);
+  background: rgba(245, 158, 11, 0.15);
+  color: #fde68a;
+}
+
+.regen {
+  margin-top: 0.9rem;
+  width: 100%;
+  border: 0;
+  border-radius: 10px;
+  padding: 0.65rem;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+  color: #042f2e;
+  background: linear-gradient(120deg, #5eead4, #fbbf24);
+}
+
+.regen:disabled {
+  opacity: 0.6;
+  cursor: wait;
+}
+
+.meta {
+  margin: 0.65rem 0 0;
+  color: #64748b;
+  font-size: 0.75rem;
+}
+
+.viz-chrome .error {
+  color: #fb7185;
+  font-size: 0.85rem;
+}
+
+@keyframes chrome-in {
+  from {
+    opacity: 0;
+    transform: translateX(-12px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@media (max-width: 720px) {
+  .viz-chrome {
+    top: auto;
+    bottom: 0.75rem;
+    left: 0.75rem;
+    right: 0.75rem;
+    width: auto;
+    max-height: 42vh;
+    overflow: auto;
+  }
+}
