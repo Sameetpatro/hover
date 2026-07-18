@@ -49,8 +49,15 @@ class Settings(BaseSettings):
 
     @property
     def sqlalchemy_url(self) -> str:
-        if self.database_url:
-            return self.database_url
+        # Prefer DATABASE_URL (Neon / Render / etc.)
+        url = (self.database_url or "").strip()
+        if url:
+            # Neon gives postgresql://... — SQLAlchemy + psycopg needs this driver prefix
+            if url.startswith("postgresql://"):
+                url = "postgresql+psycopg://" + url[len("postgresql://") :]
+            elif url.startswith("postgres://"):
+                url = "postgresql+psycopg://" + url[len("postgres://") :]
+            return url
         if self.use_sqlite:
             return f"sqlite:///{self.sqlite_path}"
         return (
