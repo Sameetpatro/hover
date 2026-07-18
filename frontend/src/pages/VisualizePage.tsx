@@ -40,7 +40,7 @@ export function VisualizePage() {
       setSnap(arch);
       setFiles(tree.files);
       setGraph(g);
-      setActiveFlowId(arch.data.flows[0]?.id ?? null);
+      setActiveFlowId(null); // All traffic = full class-diagram graph in 3D
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to load architecture");
       setSnap(null);
@@ -89,6 +89,7 @@ export function VisualizePage() {
         {snap && tab === "scene" ? (
           <ArchitectureScene
             data={snap.data}
+            graph={graph}
             activeFlowId={activeFlowId}
             selectedId={selectedId}
             onSelect={setSelectedId}
@@ -176,7 +177,9 @@ export function VisualizePage() {
 
             {tab === "scene" && (
               <>
-                <p className="hint-click">Tap a node to inspect data in / out</p>
+                <p className="hint-click">
+                  Tap a node for details. Gold = story flows · Teal = same links as Classes tab
+                </p>
                 <div className="flow-picker">
                   <span className="label">Highlight flow</span>
                   {snap.data.flows.map((f) => (

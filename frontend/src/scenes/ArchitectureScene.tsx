@@ -11,7 +11,7 @@ import {
 } from "@react-three/drei";
 import * as THREE from "three";
 import gsap from "gsap";
-import type { ArchitectureData } from "../api";
+import type { ArchitectureData, GraphPayload } from "../api";
 import {
   colorForKind,
   mapArchitecture,
@@ -136,11 +136,13 @@ function FlowBeams({
   nodes,
   edges,
   activeFlowId,
+  selectedId,
   assemble,
 }: {
   nodes: LayoutNode[];
   edges: LayoutEdge[];
   activeFlowId: string | null;
+  selectedId: string | null;
   assemble: number;
 }) {
   const byId = useMemo(() => new Map(nodes.map((n) => [n.id, n])), [nodes]);
@@ -152,29 +154,76 @@ function FlowBeams({
         const a = byId.get(e.from);
         const b = byId.get(e.to);
         if (!a || !b) return null;
-        const active = !activeFlowId || activeFlowId === e.flowId;
+
+        // All traffic: every edge live. Specific flow: that story + related deps.
+        // Selection: edges touching the selected node.
+        let live = false;
+        if (selectedId) {
+          live = e.from === selectedId || e.to === selectedId;
+        } else if (!activeFlowId) {
+          live = true;
+        } else if (e.kind === "story") {
+          live = e.flowId === activeFlowId;
+        } else {
+          // Keep class-diagram deps visible (dimmed) under a story highlight
+          live = false;
+        }
+
+        const showLine = true;
+        const strong =
+          live ||
+          (!activeFlowId && e.kind === "dep") ||
+          (activeFlowId && e.kind === "story" && e.flowId === activeFlowId);
+
         const from = new THREE.Vector3(...a.position);
         const to = new THREE.Vector3(...b.position);
         const mid = from.clone().lerp(to, 0.5);
-        mid.y += 1.1;
+        mid.y += e.kind === "dep" ? 0.55 : 1.15;
+
+        const color =
+          e.kind === "story" && strong
+            ? "#fde68a"
+            : live
+              ? "#5eead4"
+              : e.kind === "dep"
+                ? "#334155"
+                : "#1e293b";
+
         return (
           <group key={e.id}>
-            <Line
-              points={[from, mid, to]}
-              color={active ? "#fde68a" : "#334155"}
-              lineWidth={active ? 2.5 : 1}
-              transparent
-              opacity={active ? 0.95 : 0.25}
-            />
-            {active && (
-              <Billboard position={[mid.x, mid.y + 0.35, mid.z]}>
-                <Text fontSize={0.18} color="#fde68a" anchorX="center" maxWidth={4}>
+            {showLine && (
+              <Line
+                points={[from, mid, to]}
+                color={color}
+                lineWidth={strong || live ? (e.kind === "story" ? 2.6 : 2) : 1}
+                transparent
+                opacity={strong || live ? 0.95 : e.kind === "dep" ? 0.45 : 0.2}
+              />
+            )}
+            {(live || (!activeFlowId && e.kind === "dep")) && (
+              <Billboard position={[mid.x, mid.y + 0.3, mid.z]}>
+                <Text
+                  fontSize={0.16}
+                  color={e.kind === "story" ? "#fde68a" : "#99f6e4"}
+                  anchorX="center"
+                  maxWidth={4.5}
+                >
                   {`${e.via}: ${e.data}`}
                 </Text>
               </Billboard>
             )}
-            <Packet from={from} to={to} active={active} delay={Math.random()} />
-            <Packet from={from} to={to} active={active} delay={Math.random() * 0.5} />
+            <Packet
+              from={from}
+              to={to}
+              active={live || (!activeFlowId && e.kind === "dep")}
+              delay={Math.random()}
+            />
+            <Packet
+              from={from}
+              to={to}
+              active={live || (!activeFlowId && e.kind === "dep")}
+              delay={Math.random() * 0.5}
+            />
           </group>
         );
       })}
@@ -213,16 +262,18 @@ function LayerPlanes({ layers }: { layers: ArchitectureData["layers"] }) {
 
 function SceneContent({
   data,
+  graph,
   activeFlowId,
   selectedId,
   onSelect,
 }: {
   data: ArchitectureData;
+  graph: GraphPayload | null;
   activeFlowId: string | null;
   selectedId: string | null;
   onSelect: (id: string | null) => void;
 }) {
-  const { nodes, edges } = useMemo(() => mapArchitecture(data), [data]);
+  const { nodes, edges } = useMemo(() => mapArchitecture(data, graph), [data, graph]);
   const [assemble, setAssemble] = useState(0);
   const highlighted = useMemo(() => {
     if (selectedId) {
@@ -238,12 +289,21 @@ function SceneContent({
     if (!activeFlowId) return new Set(nodes.map((n) => n.id));
     const ids = new Set<string>();
     for (const e of edges) {
-      if (e.flowId === activeFlowId) {
+      if (e.flowId === activeFlowId || e.kind === "dep") {
+        if (e.flowId === activeFlowId) {
+          ids.add(e.from);
+          ids.add(e.to);
+        }
+      }
+    }
+    // Still light up story path nodes
+    for (const e of edges) {
+      if (e.kind === "story" && e.flowId === activeFlowId) {
         ids.add(e.from);
         ids.add(e.to);
       }
     }
-    return ids;
+    return ids.size ? ids : new Set(nodes.map((n) => n.id));
   }, [activeFlowId, edges, nodes, selectedId]);
 
   useEffect(() => {
@@ -257,7 +317,7 @@ function SceneContent({
     return () => {
       tween.kill();
     };
-  }, [data]);
+  }, [data, graph]);
 
   return (
     <>
@@ -291,6 +351,7 @@ function SceneContent({
         nodes={nodes}
         edges={edges}
         activeFlowId={activeFlowId}
+        selectedId={selectedId}
         assemble={assemble}
       />
       <OrbitControls
@@ -306,11 +367,13 @@ function SceneContent({
 
 export function ArchitectureScene({
   data,
+  graph,
   activeFlowId,
   selectedId,
   onSelect,
 }: {
   data: ArchitectureData;
+  graph: GraphPayload | null;
   activeFlowId: string | null;
   selectedId: string | null;
   onSelect: (id: string | null) => void;
@@ -320,6 +383,7 @@ export function ArchitectureScene({
       <PerspectiveCamera makeDefault position={[10, 7, 14]} fov={45} />
       <SceneContent
         data={data}
+        graph={graph}
         activeFlowId={activeFlowId}
         selectedId={selectedId}
         onSelect={onSelect}

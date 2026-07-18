@@ -1,6 +1,6 @@
 import { useMemo } from "react";
 import type { ArchitectureComponent, GraphPayload } from "../api";
-import { colorForKind } from "../lib/architectureMapper";
+import { colorForKind, liftComponentEdges } from "../lib/architectureMapper";
 import { kindLabel } from "../lib/flowNarrative";
 
 type Props = {
@@ -9,39 +9,6 @@ type Props = {
   selectedId: string | null;
   onSelect: (id: string) => void;
 };
-
-/** Map file paths → component ids, then lift file import edges to component edges. */
-function componentEdges(
-  components: ArchitectureComponent[],
-  graph: GraphPayload | null,
-): { from: string; to: string; via: string }[] {
-  const fileToComp = new Map<string, string>();
-  for (const c of components) {
-    for (const f of c.files) fileToComp.set(f, c.id);
-  }
-  const seen = new Set<string>();
-  const out: { from: string; to: string; via: string }[] = [];
-  for (const e of graph?.edges ?? []) {
-    const a = fileToComp.get(e.source);
-    const b = fileToComp.get(e.target);
-    if (!a || !b || a === b) continue;
-    const key = `${a}->${b}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    out.push({ from: a, to: b, via: e.edge_type || "import" });
-  }
-  // Fallback: connect by layer order if no graph edges
-  if (!out.length && components.length > 1) {
-    const order = ["client", "api", "services", "data"];
-    const sorted = [...components].sort(
-      (x, y) => order.indexOf(x.layer_id) - order.indexOf(y.layer_id),
-    );
-    for (let i = 0; i < sorted.length - 1; i++) {
-      out.push({ from: sorted[i].id, to: sorted[i + 1].id, via: "flow" });
-    }
-  }
-  return out;
-}
 
 export function ClassDiagram({ components, graph, selectedId, onSelect }: Props) {
   const layout = useMemo(() => {
@@ -84,7 +51,7 @@ export function ClassDiagram({ components, graph, selectedId, onSelect }: Props)
       });
       orphanI++;
     }
-    const edges = componentEdges(components, graph);
+    const edges = liftComponentEdges(components, graph);
     const height = 40 + (layers.length + (orphanI ? 1 : 0)) * gapY + 40;
     return { positions, edges, width: maxW, height, boxW, boxH };
   }, [components, graph]);
