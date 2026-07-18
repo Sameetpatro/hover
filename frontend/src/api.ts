@@ -40,12 +40,14 @@ export type FlowStep = {
   to: string;
   via: string;
   data: string;
+  description?: string;
 };
 
 export type ArchitectureFlow = {
   id: string;
   label: string;
   steps: FlowStep[];
+  description?: string;
 };
 
 export type ArchitectureData = {
@@ -64,6 +66,30 @@ export type ArchitectureSnapshot = {
   summary: string;
   data: ArchitectureData;
   created_at: string;
+};
+
+export type ProjectFileRow = {
+  id?: string;
+  path: string;
+  language: string;
+  role: string;
+  loc: number;
+  size_bytes?: number;
+};
+
+export type GraphPayload = {
+  nodes: { id: string; key: string; label: string; kind: string; metadata?: Record<string, unknown> }[];
+  edges: { id: string; source: string; target: string; edge_type: string }[];
+};
+
+export type SymbolRow = {
+  id: string;
+  name: string;
+  kind: string;
+  file: string;
+  start_line: number;
+  end_line: number;
+  signature: string;
 };
 
 const BASE = "/api";
@@ -91,7 +117,6 @@ export const api = {
 
   getProject: (id: string) => call<Project>(`/projects/${id}/`),
 
-  // Upload the ZIP file (multipart form)
   uploadFile: async (projectId: string, file: File) => {
     const form = new FormData();
     form.append("file", file);
@@ -102,7 +127,6 @@ export const api = {
     );
   },
 
-  // Tell the backend: "file is ready — start analysis"
   completeUpload: (projectId: string, uploadId: string) =>
     call<AnalysisJob>(`/projects/${projectId}/uploads/complete/`, {
       method: "POST",
@@ -113,10 +137,11 @@ export const api = {
   getJob: (jobId: string) => call<AnalysisJob>(`/jobs/${jobId}/`),
 
   getTree: (projectId: string) =>
-    call<{
-      files: { path: string; language: string; role: string; loc: number }[];
-      count: number;
-    }>(`/projects/${projectId}/tree/`),
+    call<{ files: ProjectFileRow[]; count: number }>(`/projects/${projectId}/tree/`),
+
+  getGraph: (projectId: string) => call<GraphPayload>(`/projects/${projectId}/graph/`),
+
+  getSymbols: (projectId: string) => call<SymbolRow[]>(`/projects/${projectId}/symbols/`),
 
   getArchitecture: (projectId: string) =>
     call<ArchitectureSnapshot>(`/projects/${projectId}/architecture/`),

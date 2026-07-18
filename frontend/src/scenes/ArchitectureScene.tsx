@@ -1,5 +1,5 @@
 import { useMemo, useRef, useState, useEffect } from "react";
-import { Canvas, useFrame } from "@react-three/fiber";
+import { Canvas, useFrame, type ThreeEvent } from "@react-three/fiber";
 import {
   Billboard,
   Float,
@@ -38,11 +38,15 @@ function geometryForKind(kind: string) {
 function NodeMesh({
   node,
   highlighted,
+  selected,
   assemble,
+  onSelect,
 }: {
   node: LayoutNode;
   highlighted: boolean;
+  selected: boolean;
   assemble: number;
+  onSelect: (id: string) => void;
 }) {
   const ref = useRef<THREE.Mesh>(null);
   const color = colorForKind(node.kind);
@@ -62,24 +66,29 @@ function NodeMesh({
     const target = new THREE.Vector3(...node.position);
     const pos = scatter.clone().lerp(target, assemble);
     ref.current.position.copy(pos);
-    ref.current.rotation.y += highlighted ? 0.04 : 0.008;
-    const s = highlighted ? 1.25 : 1;
-    ref.current.scale.lerp(new THREE.Vector3(s, s, s), 0.1);
+    ref.current.rotation.y += selected ? 0.06 : highlighted ? 0.04 : 0.008;
+    const s = selected ? 1.4 : highlighted ? 1.2 : 1;
+    ref.current.scale.lerp(new THREE.Vector3(s, s, s), 0.12);
   });
+
+  const handleClick = (e: ThreeEvent<MouseEvent>) => {
+    e.stopPropagation();
+    onSelect(node.id);
+  };
 
   return (
     <Float speed={1.2} rotationIntensity={0.2} floatIntensity={0.35}>
-      <mesh ref={ref}>
+      <mesh ref={ref} onClick={handleClick} onPointerOver={() => { document.body.style.cursor = "pointer"; }} onPointerOut={() => { document.body.style.cursor = "default"; }}>
         {geometryForKind(node.kind)}
         <meshStandardMaterial
           color={color}
           emissive={color}
-          emissiveIntensity={highlighted ? 1.4 : 0.45}
+          emissiveIntensity={selected ? 2 : highlighted ? 1.3 : 0.45}
           metalness={0.55}
           roughness={0.25}
         />
       </mesh>
-      <Billboard position={[node.position[0], node.position[1] + 1.1, node.position[2]]}>
+      <Billboard position={[node.position[0], node.position[1] + 1.15, node.position[2]]}>
         <Text fontSize={0.28} color="#f8fafc" anchorX="center" anchorY="middle" maxWidth={3}>
           {node.name}
         </Text>
@@ -106,7 +115,6 @@ function Packet({
     if (!ref.current || !active) return;
     t.current = (t.current + delta * 0.55) % 1;
     const p = from.clone().lerp(to, t.current);
-    // slight arc
     p.y += Math.sin(t.current * Math.PI) * 1.2;
     ref.current.position.copy(p);
   });
@@ -158,6 +166,13 @@ function FlowBeams({
               transparent
               opacity={active ? 0.95 : 0.25}
             />
+            {active && (
+              <Billboard position={[mid.x, mid.y + 0.35, mid.z]}>
+                <Text fontSize={0.18} color="#fde68a" anchorX="center" maxWidth={4}>
+                  {`${e.via}: ${e.data}`}
+                </Text>
+              </Billboard>
+            )}
             <Packet from={from} to={to} active={active} delay={Math.random()} />
             <Packet from={from} to={to} active={active} delay={Math.random() * 0.5} />
           </group>
@@ -187,12 +202,7 @@ function LayerPlanes({ layers }: { layers: ArchitectureData["layers"] }) {
               side={THREE.DoubleSide}
             />
           </mesh>
-          <Text
-            position={[-7.2, 0.2, 0]}
-            fontSize={0.35}
-            color="#94a3b8"
-            anchorX="left"
-          >
+          <Text position={[-7.2, 0.2, 0]} fontSize={0.35} color="#94a3b8" anchorX="left">
             {l.label.toUpperCase()}
           </Text>
         </group>
@@ -204,13 +214,27 @@ function LayerPlanes({ layers }: { layers: ArchitectureData["layers"] }) {
 function SceneContent({
   data,
   activeFlowId,
+  selectedId,
+  onSelect,
 }: {
   data: ArchitectureData;
   activeFlowId: string | null;
+  selectedId: string | null;
+  onSelect: (id: string | null) => void;
 }) {
   const { nodes, edges } = useMemo(() => mapArchitecture(data), [data]);
   const [assemble, setAssemble] = useState(0);
   const highlighted = useMemo(() => {
+    if (selectedId) {
+      const ids = new Set<string>([selectedId]);
+      for (const e of edges) {
+        if (e.from === selectedId || e.to === selectedId) {
+          ids.add(e.from);
+          ids.add(e.to);
+        }
+      }
+      return ids;
+    }
     if (!activeFlowId) return new Set(nodes.map((n) => n.id));
     const ids = new Set<string>();
     for (const e of edges) {
@@ -220,7 +244,7 @@ function SceneContent({
       }
     }
     return ids;
-  }, [activeFlowId, edges, nodes]);
+  }, [activeFlowId, edges, nodes, selectedId]);
 
   useEffect(() => {
     const state = { t: 0 };
@@ -245,12 +269,22 @@ function SceneContent({
       <pointLight position={[6, 2, 8]} intensity={0.9} color="#f59e0b" />
       <Stars radius={80} depth={40} count={2500} factor={3} saturation={0} fade speed={0.6} />
       <LayerPlanes layers={data.layers} />
+      <mesh
+        position={[0, -3, 0]}
+        rotation={[-Math.PI / 2, 0, 0]}
+        onClick={() => onSelect(null)}
+      >
+        <planeGeometry args={[80, 80]} />
+        <meshBasicMaterial transparent opacity={0} />
+      </mesh>
       {nodes.map((n) => (
         <NodeMesh
           key={n.id}
           node={n}
           highlighted={highlighted.has(n.id)}
+          selected={selectedId === n.id}
           assemble={assemble}
+          onSelect={onSelect}
         />
       ))}
       <FlowBeams
@@ -263,8 +297,8 @@ function SceneContent({
         enablePan
         maxDistance={28}
         minDistance={6}
-        autoRotate={assemble >= 1}
-        autoRotateSpeed={0.4}
+        autoRotate={assemble >= 1 && !selectedId}
+        autoRotateSpeed={0.35}
       />
     </>
   );
@@ -273,14 +307,23 @@ function SceneContent({
 export function ArchitectureScene({
   data,
   activeFlowId,
+  selectedId,
+  onSelect,
 }: {
   data: ArchitectureData;
   activeFlowId: string | null;
+  selectedId: string | null;
+  onSelect: (id: string | null) => void;
 }) {
   return (
     <Canvas dpr={[1, 2]}>
       <PerspectiveCamera makeDefault position={[10, 7, 14]} fov={45} />
-      <SceneContent data={data} activeFlowId={activeFlowId} />
+      <SceneContent
+        data={data}
+        activeFlowId={activeFlowId}
+        selectedId={selectedId}
+        onSelect={onSelect}
+      />
     </Canvas>
   );
 }

@@ -91,20 +91,106 @@ def heuristic_architecture(
 
     flows = []
     if ui and api:
-        steps = [{"from": ui[0]["id"], "to": api[0]["id"], "via": "HTTP", "data": "Request"}]
+        steps = [
+            {
+                "from": ui[0]["id"],
+                "to": api[0]["id"],
+                "via": "HTTP",
+                "data": "HTTP Request / JSON body",
+                "description": (
+                    f"User action in {ui[0]['name']} triggers an HTTP call into "
+                    f"{api[0]['name']} (controllers/routes)."
+                ),
+            }
+        ]
         if svc:
-            steps.append({"from": api[0]["id"], "to": svc[0]["id"], "via": "call", "data": "Domain call"})
+            steps.append(
+                {
+                    "from": api[0]["id"],
+                    "to": svc[0]["id"],
+                    "via": "call",
+                    "data": "Domain command / DTO",
+                    "description": (
+                        f"{api[0]['name']} validates the request and calls "
+                        f"{svc[0]['name']} for business logic."
+                    ),
+                }
+            )
             if data:
-                steps.append({"from": svc[0]["id"], "to": data[0]["id"], "via": "db", "data": "Persist"})
+                steps.append(
+                    {
+                        "from": svc[0]["id"],
+                        "to": data[0]["id"],
+                        "via": "db",
+                        "data": "Entity / row to persist",
+                        "description": (
+                            f"{svc[0]['name']} writes or updates records through "
+                            f"{data[0]['name']} (models / repository)."
+                        ),
+                    }
+                )
         elif data:
-            steps.append({"from": api[0]["id"], "to": data[0]["id"], "via": "db", "data": "Query"})
-        flows.append({"id": f"flow_{uuid.uuid4().hex[:8]}", "label": "Client request path", "steps": steps})
+            steps.append(
+                {
+                    "from": api[0]["id"],
+                    "to": data[0]["id"],
+                    "via": "db",
+                    "data": "Query / persist",
+                    "description": (
+                        f"{api[0]['name']} talks directly to {data[0]['name']} "
+                        "for reads or writes."
+                    ),
+                }
+            )
+        flows.append(
+            {
+                "id": f"flow_{uuid.uuid4().hex[:8]}",
+                "label": "Client request path",
+                "description": (
+                    "End-to-end path of a typical user request: UI → API → "
+                    "services/data, showing what payload moves at each hop."
+                ),
+                "steps": steps,
+            }
+        )
 
     if api and worker:
-        steps = [{"from": api[0]["id"], "to": worker[0]["id"], "via": "queue", "data": "Job"}]
+        steps = [
+            {
+                "from": api[0]["id"],
+                "to": worker[0]["id"],
+                "via": "queue",
+                "data": "Job payload / task id",
+                "description": (
+                    f"{api[0]['name']} enqueues async work for {worker[0]['name']} "
+                    "(background processing)."
+                ),
+            }
+        ]
         if data:
-            steps.append({"from": worker[0]["id"], "to": data[0]["id"], "via": "db", "data": "Write"})
-        flows.append({"id": f"flow_{uuid.uuid4().hex[:8]}", "label": "Async job path", "steps": steps})
+            steps.append(
+                {
+                    "from": worker[0]["id"],
+                    "to": data[0]["id"],
+                    "via": "db",
+                    "data": "Processed result / status",
+                    "description": (
+                        f"{worker[0]['name']} finishes the job and updates "
+                        f"{data[0]['name']}."
+                    ),
+                }
+            )
+        flows.append(
+            {
+                "id": f"flow_{uuid.uuid4().hex[:8]}",
+                "label": "Async job path",
+                "description": (
+                    "How work leaves the request thread: API pushes a job, "
+                    "a worker consumes it, then optionally persists results."
+                ),
+                "steps": steps,
+            }
+        )
 
     if edges and len(components) >= 2:
         pairs: Counter[tuple[str, str]] = Counter()
@@ -115,11 +201,27 @@ def heuristic_architecture(
                 pairs[(a, b)] += 1
         if pairs:
             (a, b), _ = pairs.most_common(1)[0]
+            a_name = next((c["name"] for c in components if c["id"] == a), a)
+            b_name = next((c["name"] for c in components if c["id"] == b), b)
             flows.append(
                 {
                     "id": f"flow_{uuid.uuid4().hex[:8]}",
                     "label": "Module dependency flow",
-                    "steps": [{"from": a, "to": b, "via": "import", "data": "Module"}],
+                    "description": (
+                        f"Strongest import link in the codebase: {a_name} depends on {b_name}."
+                    ),
+                    "steps": [
+                        {
+                            "from": a,
+                            "to": b,
+                            "via": "import",
+                            "data": "Module / symbol reference",
+                            "description": (
+                                f"Code in {a_name} imports symbols from {b_name} "
+                                "(compile-time / static dependency)."
+                            ),
+                        }
+                    ],
                 }
             )
 
@@ -128,12 +230,16 @@ def heuristic_architecture(
             {
                 "id": f"flow_{uuid.uuid4().hex[:8]}",
                 "label": "Primary path",
+                "description": "Fallback path connecting the two largest components.",
                 "steps": [
                     {
                         "from": components[0]["id"],
                         "to": components[1]["id"],
                         "via": "call",
-                        "data": "Data",
+                        "data": "Internal data",
+                        "description": (
+                            f"{components[0]['name']} interacts with {components[1]['name']}."
+                        ),
                     }
                 ],
             }
