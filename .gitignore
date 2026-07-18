@@ -4,6 +4,7 @@ __pycache__/
 *.sqlite3
 .env
 .env.local
+.env.render
 backend/media/
 backend/extracted/
 backend/hover.db
@@ -13,5 +14,3 @@ frontend/dist/
 .DS_Store
 *.egg-info/
 .pytest_cache/
-docs/
-fixtures/
