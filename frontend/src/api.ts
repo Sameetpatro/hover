@@ -1,3 +1,6 @@
+// Simple frontend API helper.
+// Vite proxies /api → FastAPI on :8000.
+
 export type Project = {
   id: string;
   name: string;
@@ -65,8 +68,8 @@ export type ArchitectureSnapshot = {
 
 const BASE = "/api";
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(`${BASE}${path}`, init);
+async function call<T>(path: string, options?: RequestInit): Promise<T> {
+  const res = await fetch(`${BASE}${path}`, options);
   if (!res.ok) {
     const text = await res.text();
     throw new Error(text || res.statusText);
@@ -75,39 +78,51 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export const api = {
-  health: () => request<{ status: string }>("/health/"),
-  listProjects: () => request<Project[]>("/projects/"),
+  health: () => call<{ status: string }>("/health/"),
+
+  listProjects: () => call<Project[]>("/projects/"),
+
   createProject: (name: string) =>
-    request<Project>("/projects/", {
+    call<Project>("/projects/", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ name }),
     }),
-  getProject: (id: string) => request<Project>(`/projects/${id}/`),
+
+  getProject: (id: string) => call<Project>(`/projects/${id}/`),
+
+  // Upload the ZIP file (multipart form)
   uploadFile: async (projectId: string, file: File) => {
     const form = new FormData();
     form.append("file", file);
     form.append("filename", file.name);
-    return request<{ upload_id: string; s3_key: string; direct: boolean }>(
+    return call<{ upload_id: string; s3_key: string; direct: boolean }>(
       `/projects/${projectId}/uploads/`,
       { method: "POST", body: form },
     );
   },
+
+  // Tell the backend: "file is ready — start analysis"
   completeUpload: (projectId: string, uploadId: string) =>
-    request<AnalysisJob>(`/projects/${projectId}/uploads/complete/`, {
+    call<AnalysisJob>(`/projects/${projectId}/uploads/complete/`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ upload_id: uploadId }),
     }),
-  getJob: (jobId: string) => request<AnalysisJob>(`/jobs/${jobId}/`),
+
+  getJob: (jobId: string) => call<AnalysisJob>(`/jobs/${jobId}/`),
+
   getTree: (projectId: string) =>
-    request<{ files: { path: string; language: string; role: string; loc: number }[]; count: number }>(
-      `/projects/${projectId}/tree/`,
-    ),
+    call<{
+      files: { path: string; language: string; role: string; loc: number }[];
+      count: number;
+    }>(`/projects/${projectId}/tree/`),
+
   getArchitecture: (projectId: string) =>
-    request<ArchitectureSnapshot>(`/projects/${projectId}/architecture/`),
+    call<ArchitectureSnapshot>(`/projects/${projectId}/architecture/`),
+
   regenerateArchitecture: (projectId: string) =>
-    request<ArchitectureSnapshot>(`/projects/${projectId}/architecture/generate/`, {
+    call<ArchitectureSnapshot>(`/projects/${projectId}/architecture/generate/`, {
       method: "POST",
     }),
 };

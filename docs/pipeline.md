@@ -1,14 +1,11 @@
-## Hover pipeline (Go)
+## Hover pipeline (FastAPI + LangChain)
 
-1. **Upload** — ZIP stored in MinIO/S3 or local media
-2. **Extract** — safe unzip + file inventory
-3. **Detect** — language + role heuristics
-4. **Analyze** — imports, symbols, dependency graph
-5. **Chunk** — symbol-aware code chunks
-6. **Embed** — OpenRouter embeddings or local hash vectors
-7. **Architecture** — RAG retrieve + LLM refine, or heuristic JSON
-8. **Visualize** — React Three Fiber cinematic scene
+1. **Upload** — ZIP stored on disk or MinIO/S3  
+2. **Extract** — safe unzip  
+3. **Detect / analyze** — language, roles, imports, symbols, graph  
+4. **Chunk** — symbol-aware pieces  
+5. **Embed** — LangChain `OpenAIEmbeddings` via OpenRouter (or local hash)  
+6. **RAG** — retrieve top chunks, LangChain `ChatOpenAI` refines Architecture JSON  
+7. **Visualize** — React + Three.js  
 
-Worker modes:
-- `WORKER_EAGER=true` — in-process goroutine (local default)
-- `WORKER_EAGER=false` + Redis — `hover -mode worker` / `-mode all`
+Jobs: eager background thread (local) or Redis worker (`python -m app.worker`).

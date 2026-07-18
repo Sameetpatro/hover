@@ -1,16 +1,18 @@
-# syntax=docker/dockerfile:1
-FROM golang:1.26-alpine AS build
-WORKDIR /src
-RUN apk add --no-cache git ca-certificates
-COPY go.mod go.sum ./
-RUN go mod download
-COPY . .
-RUN CGO_ENABLED=0 go build -o /hover ./cmd/server
+FROM python:3.13-slim
 
-FROM alpine:3.21
-RUN apk add --no-cache ca-certificates
 WORKDIR /app
-COPY --from=build /hover /app/hover
-ENV HOVER_ADDR=:8000
+
+RUN apt-get update && apt-get install -y --no-install-recommends build-essential curl \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY . .
+
+ENV PYTHONUNBUFFERED=1
+ENV PYTHONPATH=/app
+
 EXPOSE 8000
-ENTRYPOINT ["/app/hover"]
+
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

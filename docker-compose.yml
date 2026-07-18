@@ -40,8 +40,7 @@ services:
   minio-init:
     image: minio/mc:latest
     depends_on:
-      minio:
-        condition: service_started
+      - minio
     entrypoint: >
       /bin/sh -c "
       sleep 3;
@@ -54,8 +53,9 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile
-    command: ["/app/hover", "-mode", "all"]
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
     volumes:
+      - ./backend:/app
       - extracted_data:/app/extracted
       - media_data:/app/media
     ports:
@@ -63,7 +63,6 @@ services:
     env_file:
       - .env
     environment:
-      HOVER_ADDR: ":8000"
       USE_SQLITE: "false"
       USE_LOCAL_STORAGE: "false"
       WORKER_EAGER: "false"
@@ -72,6 +71,7 @@ services:
       AWS_S3_ENDPOINT_URL: http://minio:9000
       MEDIA_ROOT: /app/media
       EXTRACT_ROOT: /app/extracted
+      PYTHONPATH: /app
     depends_on:
       postgres:
         condition: service_healthy
@@ -84,8 +84,9 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile
-    command: ["/app/hover", "-mode", "worker"]
+    command: ["python", "-m", "app.worker"]
     volumes:
+      - ./backend:/app
       - extracted_data:/app/extracted
       - media_data:/app/media
     env_file:
@@ -99,13 +100,11 @@ services:
       AWS_S3_ENDPOINT_URL: http://minio:9000
       MEDIA_ROOT: /app/media
       EXTRACT_ROOT: /app/extracted
+      PYTHONPATH: /app
     depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-      web:
-        condition: service_started
+      - web
+      - redis
+      - postgres
 
 volumes:
   postgres_data:

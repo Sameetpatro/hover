@@ -1,38 +1,35 @@
 # Hover
 
-Upload a project ZIP. Hover extracts it, runs static analysis + RAG indexing, generates Architecture JSON, and renders a cinematic React + Three.js system map.
+Upload a project ZIP → **FastAPI + LangChain** analyzes it → React + Three.js shows a 3D system map.
 
-## Stack
+**Guide:** [docs/HOVER_EXPLAINED.md](docs/HOVER_EXPLAINED.md)
 
-- **Backend:** Go (chi) + Redis worker queue
-- **Storage:** MinIO (S3) or local filesystem
-- **DB:** SQLite (local) or PostgreSQL (Docker/prod)
-- **LLM:** [OpenRouter](https://openrouter.ai) (OpenAI-compatible)
-- **Frontend:** Vite + React + TypeScript + react-three-fiber + GSAP
-
-## Quick start (local)
+## Quick start
 
 ```bash
-# Backend
+# Terminal 1 — Python API
+source .venv/bin/activate
 cd backend
-go run ./cmd/server
+export PYTHONPATH=.
+uvicorn app.main:app --reload --port 8000
 
-# Frontend (other terminal)
+# Terminal 2 — React UI
 cd frontend && npm run dev
 ```
 
 Open http://localhost:5173 and upload `fixtures/sample_app.zip`.
 
-Optional: set `OPENROUTER_API_KEY` in `.env` for real embeddings + LLM architecture.
+## Stack
 
-## Docker Compose
+| Layer | Tech |
+|-------|------|
+| API | **FastAPI** |
+| RAG / LLM | **LangChain** + OpenRouter |
+| DB | SQLite (local) or Postgres |
+| Jobs | Thread (eager) or Redis worker |
+| Frontend | React + Three.js |
 
-```bash
-docker compose up --build
-cd frontend && npm run dev
-```
-
-## OpenRouter
+## OpenRouter (optional)
 
 ```env
 OPENROUTER_API_KEY=sk-or-v1-...
@@ -41,14 +38,4 @@ OPENROUTER_CHAT_MODEL=openai/gpt-4o-mini
 OPENROUTER_EMBEDDING_MODEL=openai/text-embedding-3-small
 ```
 
-## What else do you need?
-
-| Mode | Needs |
-|------|--------|
-| Local | Go 1.22+, Node — SQLite + local disk + eager worker (default) |
-| Local full stack | Docker Compose (Postgres, Redis, MinIO) |
-| Production | Neon/Postgres, Upstash Redis, R2/S3, OpenRouter, host for Go API+worker, Vercel for frontend |
-
-## API
-
-Same contract as before (`/api/projects/`, uploads, jobs, tree, graph, symbols, architecture). Frontend unchanged.
+Without a key, Hover still works (local hash embeddings + heuristic architecture).
