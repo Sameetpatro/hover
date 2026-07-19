@@ -102,5 +102,3 @@ OPENROUTER_EMBEDDING_MODEL=openai/text-embedding-3-small
 Restart the backend after changing `.env`.
 
 ---
-
-More detail: [docs/HOVER_EXPLAINED.md](docs/HOVER_EXPLAINED.md)
