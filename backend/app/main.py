@@ -2,7 +2,7 @@
 
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Response
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.db import init_db
@@ -26,6 +26,13 @@ app.add_middleware(
 app.include_router(router)
 
 
-@app.get("/")
+@app.api_route("/", methods=["GET", "HEAD"])
 def root():
     return {"service": "hover", "stack": "fastapi+langchain"}
+
+
+@app.api_route("/health", methods=["GET", "HEAD"])
+@app.api_route("/health/", methods=["GET", "HEAD"])
+def health():
+    """Render probes GET /health — keep this at the app root."""
+    return Response(content='{"status":"ok"}', media_type="application/json", status_code=200)

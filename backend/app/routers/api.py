@@ -29,10 +29,11 @@ from app.services.worker import enqueue_job
 router = APIRouter(prefix="/api")
 
 
-@router.head("/health/")
-def health():
-    """Health check — HEAD only (no body)."""
-    return Response(status_code=200)
+@router.api_route("/health", methods=["GET", "HEAD"])
+@router.api_route("/health/", methods=["GET", "HEAD"])
+def api_health():
+    """API health — GET + HEAD for probes and the frontend."""
+    return Response(content='{"status":"ok"}', media_type="application/json", status_code=200)
 
 
 @router.get("/projects/", response_model=list[ProjectOut])
