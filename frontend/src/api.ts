@@ -104,7 +104,11 @@ async function call<T>(path: string, options?: RequestInit): Promise<T> {
 }
 
 export const api = {
-  health: () => call<{ status: string }>("/health/"),
+  health: async () => {
+    const res = await fetch(`${BASE}/health/`, { method: "HEAD" });
+    if (!res.ok) throw new Error(res.statusText);
+    return { status: "ok" as const };
+  },
 
   listProjects: () => call<Project[]>("/projects/"),
 

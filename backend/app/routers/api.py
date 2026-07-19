@@ -6,7 +6,7 @@ import json
 import uuid
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Response, UploadFile
 from sqlalchemy.orm import Session
 
 from app.db import (
@@ -29,9 +29,10 @@ from app.services.worker import enqueue_job
 router = APIRouter(prefix="/api")
 
 
-@router.get("/health/")
+@router.head("/health/")
 def health():
-    return {"status": "ok", "service": "hover"}
+    """Health check — HEAD only (no body)."""
+    return Response(status_code=200)
 
 
 @router.get("/projects/", response_model=list[ProjectOut])
