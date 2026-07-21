@@ -92,7 +92,9 @@ export type SymbolRow = {
   signature: string;
 };
 
-const BASE = "/api";
+// Local: Vite proxies /api → backend. Production (Vercel): set VITE_API_BASE to the Render URL.
+const API_ORIGIN = (import.meta.env.VITE_API_BASE as string | undefined)?.replace(/\/$/, "") ?? "";
+const BASE = API_ORIGIN ? `${API_ORIGIN}/api` : "/api";
 
 async function call<T>(path: string, options?: RequestInit): Promise<T> {
   const res = await fetch(`${BASE}${path}`, options);
