@@ -18,6 +18,6 @@ frontend/dist/
 *.egg-info/
 .pytest_cache/
 
-docs/
+# docs/
 fixtures/
 scripts/
