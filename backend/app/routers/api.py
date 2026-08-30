@@ -39,6 +39,88 @@ def api_health():
     return Response(content='{"status":"ok"}', media_type="application/json", status_code=200)
 
 
+def clear_all_previous_data(db: Session, keep_project_id: str | None = None) -> None:
+    """Wipes all previously analysed project data from database and disk storage."""
+    from app.config import get_settings
+    from app.db import (
+        AnalysisJob,
+        ArchitectureSnapshot,
+        CodeChunk,
+        DependencyEdge,
+        DependencyNode,
+        Feature,
+        FeatureFlow,
+        Project,
+        ProjectChatMessage,
+        ProjectFile,
+        ProjectMeta,
+        Symbol,
+        Upload,
+    )
+    import shutil
+
+    # 1. Clear database records
+    if keep_project_id:
+        db.query(ProjectChatMessage).filter(ProjectChatMessage.project_id != keep_project_id).delete()
+        db.query(ProjectMeta).filter(ProjectMeta.project_id != keep_project_id).delete()
+        db.query(FeatureFlow).filter(FeatureFlow.project_id != keep_project_id).delete()
+        db.query(Feature).filter(Feature.project_id != keep_project_id).delete()
+        db.query(ArchitectureSnapshot).filter(ArchitectureSnapshot.project_id != keep_project_id).delete()
+        db.query(CodeChunk).filter(CodeChunk.project_id != keep_project_id).delete()
+        db.query(Symbol).filter(Symbol.project_id != keep_project_id).delete()
+        db.query(DependencyEdge).filter(DependencyEdge.project_id != keep_project_id).delete()
+        db.query(DependencyNode).filter(DependencyNode.project_id != keep_project_id).delete()
+        db.query(ProjectFile).filter(ProjectFile.project_id != keep_project_id).delete()
+        db.query(AnalysisJob).filter(AnalysisJob.project_id != keep_project_id).delete()
+        db.query(Upload).filter(Upload.project_id != keep_project_id).delete()
+        db.query(Project).filter(Project.id != keep_project_id).delete()
+    else:
+        db.query(ProjectChatMessage).delete()
+        db.query(ProjectMeta).delete()
+        db.query(FeatureFlow).delete()
+        db.query(Feature).delete()
+        db.query(ArchitectureSnapshot).delete()
+        db.query(CodeChunk).delete()
+        db.query(Symbol).delete()
+        db.query(DependencyEdge).delete()
+        db.query(DependencyNode).delete()
+        db.query(ProjectFile).delete()
+        db.query(AnalysisJob).delete()
+        db.query(Upload).delete()
+        db.query(Project).delete()
+    db.commit()
+
+    # 2. Clear disk storage
+    settings = get_settings()
+    for folder in [settings.extract_root, settings.media_root]:
+        dir_path = Path(folder)
+        if dir_path.exists():
+            for item in dir_path.iterdir():
+                if keep_project_id and item.name.startswith(keep_project_id):
+                    continue
+                try:
+                    if item.is_dir():
+                        shutil.rmtree(item, ignore_errors=True)
+                    else:
+                        item.unlink(missing_ok=True)
+                except Exception:
+                    pass
+
+    # 3. Clear in-memory agent tools cache
+    try:
+        from app.services.agents.tools import _ctx
+        _ctx.clear()
+    except Exception:
+        pass
+
+
+@router.post("/projects/reset/")
+def reset_all_projects(db: Session = Depends(get_db)):
+    """Clear all previously analysed files and start fresh."""
+    clear_all_previous_data(db)
+    return {"status": "ok", "message": "All previous analysed project data cleared"}
+
+
 @router.get("/projects/", response_model=list[ProjectOut])
 def list_projects(db: Session = Depends(get_db)):
     return db.query(Project).order_by(Project.created_at.desc()).all()
@@ -46,6 +128,9 @@ def list_projects(db: Session = Depends(get_db)):
 
 @router.post("/projects/", response_model=ProjectOut, status_code=201)
 def create_project(body: ProjectCreate, db: Session = Depends(get_db)):
+    # Automatically clear previously analysed data upon new project creation
+    clear_all_previous_data(db)
+
     name = (body.name or "").strip() or "Untitled Project"
     project = Project(name=name, status="created")
     db.add(project)

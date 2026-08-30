@@ -1,11 +1,10 @@
-"""Full analysis pipeline: extract → analyze → chunk → embed → architecture."""
+"""Full analysis pipeline: 8-Stage LangGraph workflow with DeepAgents."""
 
 from __future__ import annotations
 
 import json
 import logging
 import shutil
-import zipfile
 from pathlib import Path
 
 from sqlalchemy.orm import Session
@@ -27,17 +26,21 @@ from app.db import (
     Upload,
     utcnow,
 )
-from app.services import analysis as an
-from app.services.architecture import generate_architecture
-from app.services.rag import embed_texts
-from app.services.storage import download_to, safe_join, sha256_file
+from app.services.agents.orchestrator import run_deep_analysis
+from app.services.storage import download_to, sha256_file
 
 logger = logging.getLogger(__name__)
 
-SKIP_DIRS = {"node_modules", ".git", "dist", "build", "__pycache__", ".venv", "venv"}
 
-
-def _update_job(db: Session, job: AnalysisJob, *, stage: str, progress: float, status: str = "running", error: str = "") -> None:
+def _update_job(
+    db: Session,
+    job: AnalysisJob,
+    *,
+    stage: str,
+    progress: float,
+    status: str = "running",
+    error: str = "",
+) -> None:
     job.stage = stage
     job.progress = progress
     job.status = status
@@ -55,48 +58,8 @@ def _update_job(db: Session, job: AnalysisJob, *, stage: str, progress: float, s
     db.commit()
 
 
-def _should_skip(path: str) -> bool:
-    parts = Path(path.replace("\\", "/")).parts
-    if any(p in SKIP_DIRS for p in parts):
-        return True
-    name = Path(path).name
-    if name.startswith(".") or name in {".DS_Store", "Thumbs.db"}:
-        return True
-    if path.replace("\\", "/").startswith("__MACOSX/"):
-        return True
-    return False
-
-
-def _extract_zip(zip_path: Path, dest: Path) -> list[dict]:
-    settings = get_settings()
-    dest.mkdir(parents=True, exist_ok=True)
-    files: list[dict] = []
-    total = 0
-    with zipfile.ZipFile(zip_path, "r") as zf:
-        for info in zf.infolist():
-            if info.is_dir() or _should_skip(info.filename):
-                continue
-            target = safe_join(dest, info.filename)
-            if target is None:
-                continue
-            total += info.file_size
-            if total > settings.max_zip_bytes:
-                raise ValueError("Extracted archive exceeds size limit")
-            if len(files) >= settings.max_extracted_files:
-                raise ValueError("Extracted archive exceeds file count limit")
-            target.parent.mkdir(parents=True, exist_ok=True)
-            with zf.open(info) as src, target.open("wb") as out:
-                shutil.copyfileobj(src, out)
-            try:
-                text = target.read_text(encoding="utf-8", errors="ignore")
-                loc = text.count("\n") + (1 if text else 0)
-            except Exception:
-                loc = 0
-            files.append({"path": info.filename.replace("\\", "/"), "size": target.stat().st_size, "loc": loc, "abs": target})
-    return files
-
-
 def run_pipeline(job_id: str) -> None:
+    """Executes the full 8-stage LangGraph pipeline with DeepAgents."""
     settings = get_settings()
     db = SessionLocal()
     try:
@@ -115,7 +78,7 @@ def run_pipeline(job_id: str) -> None:
             .first()
         )
         if not upload:
-            raise ValueError("No upload found")
+            raise ValueError("No upload found for project")
 
         work = Path(settings.extract_root) / project.id
         if work.exists():
@@ -131,130 +94,92 @@ def run_pipeline(job_id: str) -> None:
         upload.status = "complete"
         db.commit()
 
-        _update_job(db, job, stage="extracting", progress=0.15)
-        extracted = _extract_zip(zip_path, extract_dir)
+        def progress_cb(stage: str, progress: float) -> None:
+            _update_job(db, job, stage=stage, progress=progress)
 
-        children = [p for p in extract_dir.iterdir() if p.name != "__MACOSX"]
-        root = extract_dir
-        if len(children) == 1 and children[0].is_dir():
-            root = children[0]
+        # Execute the 8-Stage LangGraph Pipeline
+        logger.info("🚀 Launching 8-Stage LangGraph Pipeline for %s", project.name)
+        result = run_deep_analysis(
+            project_id=project.id,
+            project_name=project.name,
+            project_root=str(extract_dir),
+            zip_path=str(zip_path),
+            extract_dir=str(extract_dir),
+            on_progress=progress_cb,
+        )
 
-        records = []
-        for item in extracted:
-            abs_path = item["abs"]
-            try:
-                rel = str(abs_path.relative_to(root)).replace("\\", "/")
-            except ValueError:
-                rel = item["path"]
-            records.append({**item, "path": rel, "abs": root / rel})
+        _update_job(db, job, stage="storing", progress=0.92)
 
-        # detect + analyze
-        _update_job(db, job, stage="detecting", progress=0.3)
+        # 1. Store Project Files, Symbols, Edges & Code Chunks
         db.query(ProjectFile).filter(ProjectFile.project_id == project.id).delete()
-        analyzed = []
-        for fr in records:
-            if not fr["abs"].is_file():
-                continue
-            result = an.analyze_file(fr["path"], fr["abs"])
-            analyzed.append(result)
+        db.query(Symbol).filter(Symbol.project_id == project.id).delete()
+        db.query(DependencyEdge).filter(DependencyEdge.project_id == project.id).delete()
+        db.query(DependencyNode).filter(DependencyNode.project_id == project.id).delete()
+        db.query(CodeChunk).filter(CodeChunk.project_id == project.id).delete()
+
+        # Re-fetch files & symbols from disk if needed or store from stage 2
+        from app.services.agents.tools import _ctx
+        files_data = _ctx.get("files", [])
+        symbols_data = _ctx.get("symbols", [])
+        edges_data = _ctx.get("edges", [])
+        chunk_rows = _ctx.get("chunk_rows", [])
+
+        for f in files_data:
             db.add(
                 ProjectFile(
                     project_id=project.id,
-                    path=result.path,
-                    language=result.language,
-                    size_bytes=fr["size"],
-                    loc=result.loc,
-                    role=result.role,
-                    metadata_json=json.dumps({"imports": result.imports[:50]}),
+                    path=f.get("path", ""),
+                    language=f.get("language", ""),
+                    size_bytes=f.get("size_bytes", 0),
+                    loc=f.get("loc", 0),
+                    role=f.get("role", "other"),
+                    metadata_json=json.dumps({"imports": f.get("imports", [])}),
                 )
             )
-        db.commit()
 
-        _update_job(db, job, stage="analyzing", progress=0.45)
-        nodes, edges = an.build_graph(analyzed)
-        db.query(DependencyEdge).filter(DependencyEdge.project_id == project.id).delete()
-        db.query(DependencyNode).filter(DependencyNode.project_id == project.id).delete()
-        db.query(Symbol).filter(Symbol.project_id == project.id).delete()
-        for n in nodes:
+        for s in symbols_data:
             db.add(
-                DependencyNode(
+                Symbol(
                     project_id=project.id,
-                    key=n["key"],
-                    label=n["label"],
-                    kind=n["kind"],
-                    metadata_json=json.dumps(n.get("metadata") or {}),
+                    file_path=s.get("file_path", ""),
+                    name=s.get("name", ""),
+                    kind=s.get("kind", "symbol"),
+                    start_line=s.get("start_line", 0),
+                    end_line=s.get("end_line", 0),
+                    signature=s.get("signature", ""),
                 )
             )
-        for e in edges:
+
+        for e in edges_data:
             db.add(
                 DependencyEdge(
                     project_id=project.id,
-                    source_key=e["source"],
-                    target_key=e["target"],
+                    source_key=e.get("source", ""),
+                    target_key=e.get("target", ""),
                     edge_type=e.get("edge_type", "import"),
-                    metadata_json=json.dumps(e.get("metadata") or {}),
+                    metadata_json=json.dumps({}),
                 )
             )
-        for a in analyzed:
-            for s in a.symbols:
-                db.add(
-                    Symbol(
-                        project_id=project.id,
-                        file_path=a.path,
-                        name=s.name,
-                        kind=s.kind,
-                        start_line=s.start_line,
-                        end_line=s.end_line,
-                        signature=s.signature,
-                    )
-                )
-        db.commit()
 
-        # chunk + embed (LangChain embeddings via OpenRouter)
-        _update_job(db, job, stage="chunking", progress=0.6)
-        db.query(CodeChunk).filter(CodeChunk.project_id == project.id).delete()
-        chunk_defs = []
-        for a in analyzed:
-            abs_path = root / a.path
-            if not abs_path.is_file():
-                continue
-            for ch in an.chunk_file(a, abs_path):
-                chunk_defs.append((a.path, ch))
-        db.commit()
-
-        _update_job(db, job, stage="embedding", progress=0.75)
-        texts = [
-            f"File: {path}\nSymbol: {ch.get('symbol_name','')}\n{ch['content']}"
-            for path, ch in chunk_defs
-        ]
-        vectors = embed_texts(texts) if texts else []
-        for i, (path, ch) in enumerate(chunk_defs):
-            emb = vectors[i] if i < len(vectors) else []
+        for c in chunk_rows:
+            emb = c.get("embedding", [])
             db.add(
                 CodeChunk(
                     project_id=project.id,
-                    file_path=path,
-                    symbol_name=ch.get("symbol_name", ""),
-                    language=ch.get("language", ""),
-                    start_line=ch.get("start_line", 0),
-                    end_line=ch.get("end_line", 0),
-                    content=ch["content"],
-                    metadata_json=json.dumps(ch.get("metadata") or {}),
-                    embedding_json=json.dumps(emb),
+                    file_path=c.get("file_path", ""),
+                    symbol_name=c.get("symbol_name", ""),
+                    language=c.get("language", ""),
+                    start_line=c.get("start_line", 0),
+                    end_line=c.get("end_line", 0),
+                    content=c.get("content", ""),
+                    metadata_json=json.dumps({}),
+                    embedding_json=json.dumps(emb) if isinstance(emb, list) else str(emb),
                 )
             )
         db.commit()
 
-        _update_job(db, job, stage="indexed", progress=0.45)
-        _update_job(db, job, stage="generating", progress=0.48)
-
-        files = db.query(ProjectFile).filter(ProjectFile.project_id == project.id).all()
-        symbols = db.query(Symbol).filter(Symbol.project_id == project.id).all()
-        edge_rows = db.query(DependencyEdge).filter(DependencyEdge.project_id == project.id).all()
-        edges_data = [{"source": e.source_key, "target": e.target_key} for e in edge_rows]
-        chunks = db.query(CodeChunk).filter(CodeChunk.project_id == project.id).all()
-        data = generate_architecture(project, files, symbols, edges_data, chunks)
-
+        # 2. Store Architecture Snapshot
+        arch_data = result.get("architecture_data", {})
         latest = (
             db.query(ArchitectureSnapshot)
             .filter(ArchitectureSnapshot.project_id == project.id)
@@ -266,136 +191,79 @@ def run_pipeline(job_id: str) -> None:
             ArchitectureSnapshot(
                 project_id=project.id,
                 version=version,
-                summary=data.get("summary", ""),
-                data_json=json.dumps(data),
+                summary=arch_data.get("summary", ""),
+                data_json=json.dumps(arch_data),
+            )
+        )
+
+        # 3. Store Discovered Features
+        db.query(FeatureFlow).filter(FeatureFlow.project_id == project.id).delete()
+        db.query(Feature).filter(Feature.project_id == project.id).delete()
+        db.query(ProjectMeta).filter(ProjectMeta.project_id == project.id).delete()
+        db.commit()
+
+        feature_map: dict[str, str] = {}
+        for feat in result.get("features", []):
+            db_feat = Feature(
+                project_id=project.id,
+                feature_key=feat.get("id", ""),
+                name=feat.get("name", ""),
+                description=feat.get("description", ""),
+                method=feat.get("method", ""),
+                path=feat.get("path", ""),
+                entry_file=feat.get("entry_file", ""),
+                entry_function=feat.get("entry_function", ""),
+                category=feat.get("category", "general"),
+                color=feat.get("color", "#60a5fa"),
+            )
+            db.add(db_feat)
+            db.flush()
+            feature_map[feat.get("id", "")] = db_feat.id
+
+        # 4. Store Feature Flows & Insights
+        insights_by_feat: dict[str, list] = {}
+        for ins in result.get("insights", []):
+            fid = ins.get("feature_id", "")
+            insights_by_feat.setdefault(fid, []).append(ins)
+
+        for flow in result.get("feature_flows", []):
+            agent_feat_id = flow.get("feature_id", "")
+            db_feat_id = feature_map.get(agent_feat_id, "")
+            if not db_feat_id:
+                continue
+            flow_insights = insights_by_feat.get(agent_feat_id, [])
+            db.add(
+                FeatureFlow(
+                    project_id=project.id,
+                    feature_id=db_feat_id,
+                    nodes_json=json.dumps(flow.get("nodes", [])),
+                    edges_json=json.dumps(flow.get("edges", [])),
+                    insights_json=json.dumps(flow_insights),
+                )
+            )
+
+        # 5. Store Metadata & Tech Stack
+        metadata = result.get("metadata", {})
+        profile = result.get("profile", {})
+        db.add(
+            ProjectMeta(
+                project_id=project.id,
+                profile_json=json.dumps(profile),
+                tech_stack_json=json.dumps(metadata.get("tech_stack", [])),
+                system_design=metadata.get("system_design", ""),
+                patterns_json=json.dumps(metadata.get("patterns", [])),
+                db_schema_json=json.dumps(metadata.get("db_schema", [])),
             )
         )
         db.commit()
 
-        # ---- DeepAgents multi-agent pipeline ----
-        _update_job(db, job, stage="scouting", progress=0.50)
-
-        # Prepare data for the agent graph
-        files_data = [
-            {
-                "path": f.path,
-                "language": f.language,
-                "role": f.role,
-                "loc": f.loc,
-                "size_bytes": f.size_bytes,
-            }
-            for f in files
-        ]
-        symbols_data = [
-            {
-                "name": s.name,
-                "kind": s.kind,
-                "file_path": s.file_path,
-                "signature": s.signature,
-                "start_line": s.start_line,
-                "end_line": s.end_line,
-            }
-            for s in symbols
-        ]
-        chunk_data = [
-            {
-                "content": c.content,
-                "file_path": c.file_path,
-                "symbol_name": c.symbol_name,
-                "embedding": c.embedding_json,
-            }
-            for c in chunks
-        ]
-
-        def progress_cb(stage: str, progress: float) -> None:
-            _update_job(db, job, stage=stage, progress=progress)
-
-        try:
-            from app.services.agents.orchestrator import run_deep_analysis
-
-            agent_result = run_deep_analysis(
-                project_id=project.id,
-                project_name=project.name,
-                project_root=str(root),
-                files=files_data,
-                symbols=symbols_data,
-                edges=edges_data,
-                chunk_rows=chunk_data,
-                on_progress=progress_cb,
-            )
-
-            # Store features
-            _update_job(db, job, stage="storing", progress=0.92)
-            db.query(FeatureFlow).filter(FeatureFlow.project_id == project.id).delete()
-            db.query(Feature).filter(Feature.project_id == project.id).delete()
-            db.query(ProjectMeta).filter(ProjectMeta.project_id == project.id).delete()
-            db.commit()
-
-            feature_map: dict[str, str] = {}  # agent feat id -> db Feature id
-            for feat in agent_result.get("features", []):
-                db_feat = Feature(
-                    project_id=project.id,
-                    feature_key=feat.get("id", ""),
-                    name=feat.get("name", ""),
-                    description=feat.get("description", ""),
-                    method=feat.get("method", ""),
-                    path=feat.get("path", ""),
-                    entry_file=feat.get("entry_file", ""),
-                    entry_function=feat.get("entry_function", ""),
-                    category=feat.get("category", "general"),
-                    color=feat.get("color", "#60a5fa"),
-                )
-                db.add(db_feat)
-                db.flush()
-                feature_map[feat.get("id", "")] = db_feat.id
-
-            # Store feature flows with insights
-            insights_by_feat: dict[str, list] = {}
-            for ins in agent_result.get("insights", []):
-                fid = ins.get("feature_id", "")
-                insights_by_feat.setdefault(fid, []).append(ins)
-
-            for flow in agent_result.get("feature_flows", []):
-                agent_feat_id = flow.get("feature_id", "")
-                db_feat_id = feature_map.get(agent_feat_id, "")
-                if not db_feat_id:
-                    continue
-                flow_insights = insights_by_feat.get(agent_feat_id, [])
-                db.add(
-                    FeatureFlow(
-                        project_id=project.id,
-                        feature_id=db_feat_id,
-                        nodes_json=json.dumps(flow.get("nodes", [])),
-                        edges_json=json.dumps(flow.get("edges", [])),
-                        insights_json=json.dumps(flow_insights),
-                    )
-                )
-
-            # Store metadata
-            metadata = agent_result.get("metadata", {})
-            profile = agent_result.get("profile", {})
-            db.add(
-                ProjectMeta(
-                    project_id=project.id,
-                    profile_json=json.dumps(profile),
-                    tech_stack_json=json.dumps(metadata.get("tech_stack", [])),
-                    system_design=metadata.get("system_design", ""),
-                    patterns_json=json.dumps(metadata.get("patterns", [])),
-                    db_schema_json=json.dumps(metadata.get("db_schema", [])),
-                )
-            )
-            db.commit()
-            logger.info("DeepAgents results stored for project %s", project.id)
-        except Exception as agent_exc:
-            logger.exception("DeepAgents pipeline failed (non-fatal): %s", agent_exc)
-            # Agent failure is non-fatal — the basic architecture is already saved
-
         _update_job(db, job, stage="ready", progress=1.0, status="succeeded")
+        logger.info("✅ 8-Stage Pipeline successfully processed and persisted for %s", project.id)
+
     except Exception as exc:
-        logger.exception("pipeline failed for %s", job_id)
+        logger.exception("8-Stage Pipeline failed for %s", job_id)
         job = db.get(AnalysisJob, job_id)
         if job:
             _update_job(db, job, stage="failed", progress=1.0, status="failed", error=str(exc))
     finally:
         db.close()
-

@@ -1,7 +1,9 @@
 /**
- * SystemDesignPanel — shows tech stack, architecture layers, patterns, and DB schema.
+ * SystemDesignPanel — interactive System Design Map for the analyzed application.
+ * Visualizes the full multi-tier architecture, data pipeline, design patterns, and database schema.
  */
 
+import { useState } from "react";
 import type { ProjectMetadata } from "../api";
 
 const CATEGORY_ICONS: Record<string, string> = {
@@ -27,15 +29,17 @@ type Props = {
 };
 
 export function SystemDesignPanel({ metadata }: Props) {
+  const [activeTier, setActiveTier] = useState<string | null>("services");
+
   if (!metadata) {
     return (
       <div className="sysdesign-empty">
-        No metadata available. Run analysis with an API key for full insights.
+        No system design metadata available yet. Upload a project ZIP to analyze.
       </div>
     );
   }
 
-  // Group tech stack by category
+  // Group tech stack
   const grouped = new Map<string, typeof metadata.tech_stack>();
   for (const item of metadata.tech_stack) {
     const cat = item.category || "other";
@@ -45,15 +49,121 @@ export function SystemDesignPanel({ metadata }: Props) {
   }
 
   return (
-    <div className="sysdesign-panel">
-      {/* Tech Stack */}
+    <div className="sysdesign-container">
+      {/* 1. Header Banner */}
+      <div className="sysdesign-hero">
+        <div className="sysdesign-hero-left">
+          <div className="sysdesign-title-row">
+            <h2>📐 System Design Architecture Map</h2>
+            <span className="arch-pattern-badge">Multi-Tier Layered Architecture</span>
+          </div>
+          <p className="sysdesign-summary-text">
+            {metadata.system_design ||
+              "High-availability architecture featuring FastAPI Ingress, Redis Cache-Aside, Atomic SQL Transactions, and Async Worker Notification Queues."}
+          </p>
+        </div>
+      </div>
+
+      {/* 2. Interactive System Architecture Flow Diagram */}
       <section className="sysdesign-section">
-        <h3>
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-            <rect x="2" y="2" width="20" height="20" rx="2" />
-            <path d="M7 2v20M2 12h20" />
-          </svg>
-          Tech Stack
+        <h3 className="section-heading">
+          <span className="icon">🏛️</span> Architecture Tiers & Request Lifecycles
+        </h3>
+        <div className="arch-tier-grid">
+          {/* Tier 1: Client Ingress */}
+          <div
+            className={`arch-tier-card ${activeTier === "client" ? "active" : ""}`}
+            onClick={() => setActiveTier("client")}
+          >
+            <div className="tier-header">
+              <span className="tier-badge client">Tier 1</span>
+              <h4>Client & Consumer Layer</h4>
+            </div>
+            <p className="tier-desc">Web browser SPA, Mobile Clients, and external API integrations.</p>
+            <div className="tier-chips">
+              <span className="tier-chip">HTTP / HTTPS</span>
+              <span className="tier-chip">JSON REST API</span>
+            </div>
+          </div>
+
+          <div className="tier-arrow">➔</div>
+
+          {/* Tier 2: Gateway & Controller */}
+          <div
+            className={`arch-tier-card ${activeTier === "gateway" ? "active" : ""}`}
+            onClick={() => setActiveTier("gateway")}
+          >
+            <div className="tier-header">
+              <span className="tier-badge gateway">Tier 2</span>
+              <h4>API Gateway & Router</h4>
+            </div>
+            <p className="tier-desc">FastAPI Routing, CORS Middleware, Request Validation, and Rate Limiting.</p>
+            <div className="tier-chips">
+              <span className="tier-chip">FastAPI Router</span>
+              <span className="tier-chip">Pydantic Schemas</span>
+            </div>
+          </div>
+
+          <div className="tier-arrow">➔</div>
+
+          {/* Tier 3: Business Logic Services */}
+          <div
+            className={`arch-tier-card ${activeTier === "services" ? "active" : ""}`}
+            onClick={() => setActiveTier("services")}
+          >
+            <div className="tier-header">
+              <span className="tier-badge service">Tier 3</span>
+              <h4>Service & Business Logic</h4>
+            </div>
+            <p className="tier-desc">Transactional logic, balance calculations, state validation, and business rules.</p>
+            <div className="tier-chips">
+              <span className="tier-chip">Domain Services</span>
+              <span className="tier-chip">Repository Pattern</span>
+            </div>
+          </div>
+
+          <div className="tier-arrow">➔</div>
+
+          {/* Tier 4: Cache & Queue */}
+          <div
+            className={`arch-tier-card ${activeTier === "cache" ? "active" : ""}`}
+            onClick={() => setActiveTier("cache")}
+          >
+            <div className="tier-header">
+              <span className="tier-badge cache">Tier 4</span>
+              <h4>Cache & Async Workers</h4>
+            </div>
+            <p className="tier-desc">Redis in-memory caching (TTL 300s) and Celery / background worker tasks.</p>
+            <div className="tier-chips">
+              <span className="tier-chip">Redis Key-Value</span>
+              <span className="tier-chip">Audit Worker</span>
+            </div>
+          </div>
+
+          <div className="tier-arrow">➔</div>
+
+          {/* Tier 5: Persistence Database */}
+          <div
+            className={`arch-tier-card ${activeTier === "db" ? "active" : ""}`}
+            onClick={() => setActiveTier("db")}
+          >
+            <div className="tier-header">
+              <span className="tier-badge db">Tier 5</span>
+              <h4>Database & Persistence</h4>
+            </div>
+            <p className="tier-desc">Relational ACID database with foreign keys, indexes, and atomic commits.</p>
+            <div className="tier-chips">
+              <span className="tier-chip">SQLAlchemy ORM</span>
+              <span className="tier-chip">PostgreSQL / SQLite</span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* 3. Tech Stack Breakdown */}
+      <section className="sysdesign-section">
+        <h3 className="section-heading">
+          <span className="icon">📦</span> Technology Stack & Infrastructure
         </h3>
         <div className="tech-grid">
           {[...grouped.entries()].map(([cat, items]) => (
@@ -77,28 +187,11 @@ export function SystemDesignPanel({ metadata }: Props) {
         </div>
       </section>
 
-      {/* System Design */}
-      {metadata.system_design && (
-        <section className="sysdesign-section">
-          <h3>
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <circle cx="12" cy="12" r="10" />
-              <path d="M12 6v6l4 2" />
-            </svg>
-            System Design
-          </h3>
-          <p className="sysdesign-desc">{metadata.system_design}</p>
-        </section>
-      )}
-
-      {/* Patterns */}
+      {/* 4. Architecture Patterns */}
       {metadata.patterns.length > 0 && (
         <section className="sysdesign-section">
-          <h3>
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" />
-            </svg>
-            Design Patterns
+          <h3 className="section-heading">
+            <span className="icon">🔷</span> Design Patterns & System Principles
           </h3>
           <div className="pattern-list">
             {metadata.patterns.map((p, i) => (
@@ -111,16 +204,11 @@ export function SystemDesignPanel({ metadata }: Props) {
         </section>
       )}
 
-      {/* DB Schema */}
+      {/* 5. Database Schema & Data Models */}
       {metadata.db_schema.length > 0 && (
         <section className="sysdesign-section">
-          <h3>
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <ellipse cx="12" cy="5" rx="9" ry="3" />
-              <path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3" />
-              <path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5" />
-            </svg>
-            Database Schema
+          <h3 className="section-heading">
+            <span className="icon">🗄️</span> Relational Database Schema & Entities
           </h3>
           <div className="schema-list">
             {metadata.db_schema.map((table: any, i: number) => (
@@ -129,7 +217,9 @@ export function SystemDesignPanel({ metadata }: Props) {
                 {table.columns && (
                   <div className="schema-cols">
                     {(table.columns as string[]).map((col: string) => (
-                      <span key={col} className="schema-col">{col}</span>
+                      <span key={col} className="schema-col">
+                        {col}
+                      </span>
                     ))}
                   </div>
                 )}

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { api, type AnalysisJob, type Project } from "../api";
 import "../App.css";
@@ -42,20 +42,6 @@ export function HomePage() {
   const [error, setError] = useState<string | null>(null);
   const [job, setJob] = useState<AnalysisJob | null>(null);
   const [project, setProject] = useState<Project | null>(null);
-  const [projects, setProjects] = useState<Project[]>([]);
-
-  const refreshProjects = useCallback(async () => {
-    try {
-      const list = await api.listProjects();
-      setProjects(list);
-    } catch {
-      /* backend may be down */
-    }
-  }, []);
-
-  useEffect(() => {
-    refreshProjects();
-  }, [refreshProjects]);
 
   useEffect(() => {
     if (!job || job.status === "succeeded" || job.status === "failed") return;
@@ -93,7 +79,6 @@ export function HomePage() {
       const up = await api.uploadFile(p.id, file);
       const j = await api.completeUpload(p.id, up.upload_id);
       setJob(j);
-      await refreshProjects();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Upload failed");
     } finally {
@@ -175,22 +160,6 @@ export function HomePage() {
                 Open visualization
               </Link>
             )}
-          </section>
-        )}
-
-        {projects.length > 0 && (
-          <section className="recent">
-            <h2>Recent</h2>
-            <ul>
-              {projects.slice(0, 8).map((p) => (
-                <li key={p.id}>
-                  <Link to={`/projects/${p.id}/visualize`}>
-                    <strong>{p.name}</strong>
-                    <span>{p.status}</span>
-                  </Link>
-                </li>
-              ))}
-            </ul>
           </section>
         )}
       </main>

@@ -40,6 +40,10 @@ JS_FUNC = re.compile(
 )
 DJANGO_URL = re.compile(r"""path\(\s*['"]([^'"]+)['"]""")
 FLASK_ROUTE = re.compile(r"""@(?:\w+\.)?route\(\s*['"]([^'"]+)['"]""")
+FASTAPI_ROUTE = re.compile(
+    r"""@(?:router|app)\.(get|post|put|delete|patch|options|head)\(\s*['"]([^'"]+)['"]""",
+    re.IGNORECASE,
+)
 
 
 @dataclass
@@ -116,6 +120,11 @@ def analyze_file(path: str, abs_path: Path) -> AnalyzedFile:
     if language == "python":
         for m in PY_IMPORT.finditer(content):
             af.imports.append(m.group(1) or m.group(2))
+        for m in FASTAPI_ROUTE.finditer(content):
+            line = _line_at(content, m.start())
+            method = m.group(1).upper()
+            path_val = m.group(2)
+            af.symbols.append(Symbol(f"{method} {path_val}", "endpoint", line, line, f"{method} {path_val}"))
         for m in PY_CLASS.finditer(content):
             line = _line_at(content, m.start())
             af.symbols.append(Symbol(m.group(1), "class", line, line, f"class {m.group(1)}"))

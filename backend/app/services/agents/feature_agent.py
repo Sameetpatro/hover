@@ -1,25 +1,28 @@
-"""Feature Discovery Agent — identifies individual user-facing features.
+"""Feature Discovery DeepAgent — discovers and catalogs user-facing features and endpoints.
 
-Reads API routes, controllers, and service files to discover features like:
-- "Get Student" (GET /api/students/:id)
-- "Create Order" (POST /api/orders)
-- "User Login" (POST /auth/login)
-
-Each feature gets a unique color for visualization.
+Powered by LangChain DeepAgents (deepagents.create_deep_agent).
+Analyzes routes, schemas, and controllers to discover features:
+- Endpoints (REST, GraphQL, gRPC, WebSockets)
+- User actions (Login, Register, Checkout, Search)
+- Background jobs and worker tasks
 """
 
 from __future__ import annotations
 
+import json
 import logging
+from pathlib import Path
+import re
 from typing import Any
 
-from langchain_core.messages import HumanMessage, SystemMessage
+from deepagents import create_deep_agent
+from langchain_core.messages import HumanMessage
 
 from app.services.rag import extract_json, get_chat_llm
+from app.services.agents.tools import FEATURE_TOOLS
 
 logger = logging.getLogger(__name__)
 
-# Palette of distinct, vibrant colors for feature flows
 FEATURE_COLORS = [
     "#f472b6",  # pink
     "#60a5fa",  # blue
@@ -35,49 +38,50 @@ FEATURE_COLORS = [
     "#facc15",  # yellow
 ]
 
-FEATURE_SYSTEM = """You are the Feature Discovery Agent — an expert at identifying user-facing
-features in a codebase. You analyze API routes, controllers, and services to discover
-individual features that a user or client can interact with.
+FEATURE_SYSTEM = """You are the Feature Discovery DeepAgent — an expert AI agent that identifies all distinct features and API capabilities in a codebase.
 
-A "feature" is a discrete capability: GET /students/:id, POST /orders, user login, etc.
+A "feature" is a distinct user or client interaction point:
+- API endpoints (e.g. GET /api/users, POST /api/auth/login, PUT /api/orders/:id)
+- Asynchronous tasks / workers
+- Core system workflows
 
-You MUST return ONLY valid JSON — an array of features:
+You have access to tools for AST parsing, pattern finding, symbol resolution, and database schema discovery.
+
+You MUST return ONLY a valid JSON array of feature objects:
 [
   {
-    "name": "Get Student",
-    "description": "Retrieves a single student record by ID",
-    "method": "GET",
-    "path": "/api/students/:id",
-    "entry_file": "routes/students.py",
-    "entry_function": "get_student",
-    "category": "students"
-  },
-  ...
+    "id": "feat_0",
+    "name": "User Login",
+    "description": "Authenticates user credentials and issues JWT token",
+    "method": "POST",
+    "path": "/api/auth/login",
+    "entry_file": "app/routers/auth.py",
+    "entry_function": "login",
+    "category": "authentication"
+  }
 ]
 
-Rules:
-- Group CRUD operations as separate features (Get Student, Create Student, etc.)
-- Include the HTTP method if it's an API endpoint
-- Include non-HTTP features too (CLI commands, scheduled tasks, WebSocket handlers)
-- Be thorough — find ALL features, not just the obvious ones
-- Maximum 20 features (combine very similar ones if there are more)
-- Return ONLY the JSON array, no markdown"""
+Guidelines:
+- Return between 4 and 20 discrete features.
+- Name each feature clearly (e.g., 'Get Student', 'Create Order', 'List Products').
+- Populate method, path, entry_file, and entry_function whenever identifiable.
+- Output raw JSON only."""
 
-FEATURE_PROMPT = """Discover all user-facing features in this project.
+FEATURE_PROMPT = """Discover and catalog all functional features and endpoints in this project.
 
 PROJECT PROFILE:
 {profile}
 
-API ROUTES & ENDPOINTS:
+DISCOVERED ROUTES / ENDPOINTS:
 {routes}
 
-CODE SAMPLES (controllers/routes/handlers):
+CODE SAMPLES:
 {code_samples}
 
 FILE STRUCTURE:
 {files}
 
-Find every distinct feature. Return the JSON array."""
+Use your tools to inspect schemas and symbols if needed. Return ONLY the JSON array."""
 
 
 def run_feature_agent(
@@ -86,108 +90,190 @@ def run_feature_agent(
     code_samples: str,
     file_listing: str,
 ) -> list[dict[str, Any]]:
-    """Discover features in the project.
-
-    Falls back to route-based heuristic if no LLM is available.
-    """
+    """Discover features in the project using Feature DeepAgent."""
     llm = get_chat_llm()
     if llm is None:
-        logger.info("Feature agent: no LLM, using heuristic features")
+        logger.info("Feature DeepAgent: no LLM available, generating heuristic features")
         return _heuristic_features(profile, routes)
-
-    import json
 
     prompt = FEATURE_PROMPT.format(
         profile=json.dumps(profile, indent=2)[:3000],
         routes=routes[:3000],
-        code_samples=code_samples[:6000],
+        code_samples=code_samples[:5000],
         files=file_listing[:2000],
     )
 
     try:
-        response = llm.invoke([
-            SystemMessage(content=FEATURE_SYSTEM),
-            HumanMessage(content=prompt),
-        ])
-        content = response.content if isinstance(response.content, str) else str(response.content)
-
-        # Try to parse as array
-        content = content.strip()
-        if content.startswith("```"):
-            import re
-            content = re.sub(r"^```(?:json)?\s*", "", content)
-            content = re.sub(r"\s*```$", "", content)
-
-        data = None
-        try:
-            data = json.loads(content)
-        except json.JSONDecodeError:
-            # Try extracting array
-            import re
-            match = re.search(r"\[.*\]", content, re.DOTALL)
-            if match:
-                try:
-                    data = json.loads(match.group(0))
-                except json.JSONDecodeError:
-                    pass
-
-        if isinstance(data, list) and data:
-            # Assign colors
-            for i, feat in enumerate(data):
-                feat["color"] = FEATURE_COLORS[i % len(FEATURE_COLORS)]
-                feat.setdefault("id", f"feat_{i}")
-            return data[:20]
-
-        logger.warning("Feature agent: LLM returned invalid data, falling back")
+        deep_agent = create_deep_agent(
+            model=llm,
+            tools=FEATURE_TOOLS,
+            system_prompt=FEATURE_SYSTEM,
+        )
+        response = deep_agent.invoke({
+            "messages": [HumanMessage(content=prompt)]
+        })
+        messages = response.get("messages", [])
+        if messages:
+            last_msg = messages[-1]
+            content = last_msg.content if isinstance(last_msg.content, str) else str(last_msg.content)
+            data = _parse_features_json(content)
+            if data and isinstance(data, list) and len(data) > 0:
+                for i, feat in enumerate(data):
+                    feat["color"] = FEATURE_COLORS[i % len(FEATURE_COLORS)]
+                    feat.setdefault("id", f"feat_{i}")
+                return data[:20]
     except Exception as exc:
-        logger.exception("Feature agent LLM call failed: %s", exc)
+        logger.exception("Feature DeepAgent execution failed: %s", exc)
 
     return _heuristic_features(profile, routes)
+
+
+def _parse_features_json(content: str) -> list[dict] | None:
+    content = content.strip()
+    if content.startswith("```"):
+        content = re.sub(r"^```(?:json)?\s*", "", content)
+        content = re.sub(r"\s*```$", "", content)
+    try:
+        data = json.loads(content)
+        if isinstance(data, list):
+            return data
+    except Exception:
+        pass
+
+    match = re.search(r"\[.*\]", content, re.DOTALL)
+    if match:
+        try:
+            data = json.loads(match.group(0))
+            if isinstance(data, list):
+                return data
+        except Exception:
+            pass
+    return None
+
+
+def _format_feature_name(method: str, path: str, file_path: str = "") -> tuple[str, str, str]:
+    """Generates clean human-readable name, normalized path, and category."""
+    file_stem = Path(file_path).stem.lower() if file_path else ""
+    cat = file_stem if file_stem and file_stem not in ("main", "app", "routes", "views", "api", "__init__") else "general"
+
+    # Build full route path with prefix if not present
+    full_path = path
+    if cat != "general" and not path.startswith(f"/api/{cat}") and not path.startswith(f"/{cat}"):
+        if path == "/":
+            full_path = f"/api/{cat}/"
+        else:
+            full_path = f"/api/{cat}{path if path.startswith('/') else '/' + path}"
+
+    parts = [p.replace("{", "").replace("}", "").replace(":", "") for p in path.split("/") if p]
+    if parts:
+        clean_parts = [p.replace("_", " ").title() for p in parts]
+        name = f"{method.upper()} {' '.join(clean_parts)}"
+    elif cat != "general":
+        name = f"{method.upper()} {cat.replace('_', ' ').title()}"
+    else:
+        name = f"{method.upper()} Root"
+
+    return name, full_path, cat
 
 
 def _heuristic_features(
     profile: dict[str, Any], routes: str
 ) -> list[dict[str, Any]]:
-    """Build features from entry points in the profile."""
+    """Build features from entry points, discovered routes text, and tool symbols."""
     features = []
+    seen_routes = set()
+
+    # 1. From profile entry points
     entry_points = profile.get("entry_points", [])
-
-    for i, ep in enumerate(entry_points[:20]):
-        method = ep.get("method", "?").upper()
-        path = ep.get("path", "?")
-        file_ = ep.get("file", "?")
-
-        # Generate a name from the path
-        parts = [p for p in path.split("/") if p and not p.startswith(":") and not p.startswith("{")]
-        name_parts = parts[-2:] if len(parts) >= 2 else parts
-        if method in ("GET", "POST", "PUT", "DELETE", "PATCH"):
-            name = f"{method.title()} {' '.join(p.title() for p in name_parts)}"
-        else:
-            name = " ".join(p.title() for p in name_parts) or f"Feature {i + 1}"
+    for ep in entry_points:
+        method = ep.get("method", "GET").upper()
+        path = ep.get("path", "/")
+        file_ = ep.get("file", "")
+        name, full_path, cat = _format_feature_name(method, path, file_)
+        key = f"{method}:{full_path}"
+        if key in seen_routes:
+            continue
+        seen_routes.add(key)
 
         features.append({
-            "id": f"feat_{i}",
+            "id": f"feat_{len(features)}",
             "name": name,
-            "description": f"{method} {path}",
+            "description": f"{method} {full_path}",
             "method": method,
-            "path": path,
+            "path": full_path,
             "entry_file": file_,
-            "entry_function": "",
-            "category": name_parts[0] if name_parts else "general",
-            "color": FEATURE_COLORS[i % len(FEATURE_COLORS)],
+            "entry_function": ep.get("entry_function", ""),
+            "category": cat,
+            "color": FEATURE_COLORS[len(features) % len(FEATURE_COLORS)],
         })
+
+    # 2. Parse from routes string if profile entry points missed some
+    if routes and routes != "(no routes found)":
+        for line in routes.splitlines():
+            line = line.strip()
+            if not line or line.startswith("==="):
+                continue
+            m = re.search(r"\b(GET|POST|PUT|DELETE|PATCH)\s+([/\w{}\-:_]+)", line, re.IGNORECASE)
+            file_m = re.search(r"in\s+([^\s]+)", line)
+            if m:
+                method = m.group(1).upper()
+                path = m.group(2)
+                file_ = file_m.group(1) if file_m else ""
+                name, full_path, cat = _format_feature_name(method, path, file_)
+                key = f"{method}:{full_path}"
+                if key not in seen_routes:
+                    seen_routes.add(key)
+                    features.append({
+                        "id": f"feat_{len(features)}",
+                        "name": name,
+                        "description": f"{method} {full_path}",
+                        "method": method,
+                        "path": full_path,
+                        "entry_file": file_,
+                        "entry_function": "",
+                        "category": cat,
+                        "color": FEATURE_COLORS[len(features) % len(FEATURE_COLORS)],
+                    })
+
+    # 3. Fallback from tool symbols directly
+    if not features:
+        from app.services.agents.tools import _get
+        symbols = _get("symbols")
+        for s in symbols:
+            if s.get("kind") == "endpoint":
+                sig = s.get("signature", s.get("name", ""))
+                m = re.search(r"(GET|POST|PUT|DELETE|PATCH)\s+([/\w{}\-:_]+)", sig, re.IGNORECASE)
+                if m:
+                    method = m.group(1).upper()
+                    path = m.group(2)
+                    file_ = s.get("file_path", "")
+                    name, full_path, cat = _format_feature_name(method, path, file_)
+                    key = f"{method}:{full_path}"
+                    if key not in seen_routes:
+                        seen_routes.add(key)
+                        features.append({
+                            "id": f"feat_{len(features)}",
+                            "name": name,
+                            "description": f"{method} {full_path}",
+                            "method": method,
+                            "path": full_path,
+                            "entry_file": file_,
+                            "entry_function": s.get("name", ""),
+                            "category": cat,
+                            "color": FEATURE_COLORS[len(features) % len(FEATURE_COLORS)],
+                        })
 
     if not features:
         features.append({
             "id": "feat_0",
-            "name": "Main Application",
-            "description": "Primary application entry point",
-            "method": "",
+            "name": "Core Application Service",
+            "description": "Primary service entry point",
+            "method": "GET",
             "path": "/",
             "entry_file": "",
             "entry_function": "",
-            "category": "general",
+            "category": "core",
             "color": FEATURE_COLORS[0],
         })
 
-    return features
+    return features[:20]

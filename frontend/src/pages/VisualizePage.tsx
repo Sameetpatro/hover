@@ -8,7 +8,6 @@ import {
   type ProjectFileRow,
   type ProjectMetadata,
 } from "../api";
-import { ArchitectureScene } from "../scenes/ArchitectureScene";
 import { ProjectTree } from "../components/ProjectTree";
 import { ClassDiagram } from "../components/ClassDiagram";
 import { NodeInspector } from "../components/NodeInspector";
@@ -16,10 +15,11 @@ import { FeatureFlowDiagram } from "../components/FeatureFlowDiagram";
 import { FeatureSidebar } from "../components/FeatureSidebar";
 import { SystemDesignPanel } from "../components/SystemDesignPanel";
 import { CodebaseChatbot } from "../components/CodebaseChatbot";
-import { describeFlow } from "../lib/flowNarrative";
+import { BottomInsightBar } from "../components/BottomInsightBar";
+import type { FlowEdgePayload } from "../components/FlowEdge";
 import "./Visualize.css";
 
-type Tab = "flows" | "scene" | "system" | "classes" | "tree";
+type Tab = "flows" | "system" | "classes" | "tree";
 
 export function VisualizePage() {
   const { id } = useParams();
@@ -28,9 +28,9 @@ export function VisualizePage() {
   const [graph, setGraph] = useState<GraphPayload | null>(null);
   const [featureFlows, setFeatureFlows] = useState<FeatureWithFlow[]>([]);
   const [metadata, setMetadata] = useState<ProjectMetadata | null>(null);
-  const [activeFlowId, setActiveFlowId] = useState<string | null>(null);
   const [activeFeatureId, setActiveFeatureId] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [hoveredInsight, setHoveredInsight] = useState<FlowEdgePayload | null>(null);
   const [tab, setTab] = useState<Tab>("flows");
   const [isChatOpen, setIsChatOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -54,14 +54,8 @@ export function VisualizePage() {
       setGraph(g);
       setFeatureFlows(flows);
       setMetadata(meta);
-      setActiveFlowId(null);
       setActiveFeatureId(null);
-      // Default to flows tab if features exist, else 3D scene
-      if (flows.length > 0) {
-        setTab("flows");
-      } else {
-        setTab("scene");
-      }
+      setTab("flows");
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to load architecture");
       setSnap(null);
@@ -80,14 +74,12 @@ export function VisualizePage() {
     try {
       const data = await api.regenerateArchitecture(id);
       setSnap(data);
-      // Reload feature flows and metadata
       const [flows, meta] = await Promise.all([
         api.getAllFlows(id).catch(() => []),
         api.getMetadata(id).catch(() => null),
       ]);
       setFeatureFlows(flows);
       setMetadata(meta);
-      setActiveFlowId(data.data.flows[0]?.id ?? null);
       setActiveFeatureId(null);
       setSelectedId(null);
     } catch (e) {
@@ -102,11 +94,6 @@ export function VisualizePage() {
     [snap, selectedId],
   );
 
-  const activeFlow = useMemo(
-    () => snap?.data.flows.find((f) => f.id === activeFlowId) ?? null,
-    [snap, activeFlowId],
-  );
-
   const features = useMemo(
     () => featureFlows.map((ff) => ff.feature),
     [featureFlows],
@@ -114,159 +101,131 @@ export function VisualizePage() {
 
   return (
     <div className="viz-page">
-      {/* Feature sidebar — only visible on flows tab */}
-      {tab === "flows" && features.length > 0 && (
-        <aside className="viz-features">
-          <FeatureSidebar
-            features={features}
-            activeId={activeFeatureId}
-            onSelect={setActiveFeatureId}
-          />
-        </aside>
-      )}
+      {/* 1. TOP NAVBAR: Brand, Project Info, Tab Switcher, Actions */}
+      <header className="viz-top-navbar">
+        <div className="viz-top-left">
+          <Link to="/" className="top-brand">
+            HOVER
+          </Link>
+          {snap && (
+            <div className="top-project-badge">
+              <span className="top-project-name">{snap.data.project_name}</span>
+              <span className="top-project-meta">
+                v{snap.version} · {files.length} files · {features.length} endpoints
+              </span>
+            </div>
+          )}
+        </div>
 
-      <div className="viz-canvas">
-        {tab === "flows" ? (
-          <FeatureFlowDiagram
-            featureFlows={featureFlows}
-            activeFeatureId={activeFeatureId}
-          />
-        ) : snap && tab === "scene" ? (
-          <ArchitectureScene
-            data={snap.data}
-            graph={graph}
-            activeFlowId={activeFlowId}
-            selectedId={selectedId}
-            onSelect={setSelectedId}
-          />
-        ) : snap && tab === "tree" ? (
-          <div className="viz-panel-main">
-            <ProjectTree files={files} />
-          </div>
-        ) : snap && tab === "classes" ? (
-          <div className="viz-panel-main diagram-main">
-            <ClassDiagram
-              components={snap.data.components}
-              graph={graph}
-              selectedId={selectedId}
-              onSelect={setSelectedId}
+        {/* Navigation Tabs in Header */}
+        <nav className="viz-top-tabs">
+          <button
+            type="button"
+            className={`top-tab ${tab === "flows" ? "active" : ""}`}
+            onClick={() => setTab("flows")}
+          >
+            ⚡ 3D Flows
+            {features.length > 0 && <span className="tab-pill">{features.length}</span>}
+          </button>
+          <button
+            type="button"
+            className={`top-tab ${tab === "system" ? "active" : ""}`}
+            onClick={() => setTab("system")}
+          >
+            📐 System Design Map
+          </button>
+          <button
+            type="button"
+            className={`top-tab ${tab === "classes" ? "active" : ""}`}
+            onClick={() => setTab("classes")}
+          >
+            🏛️ Classes
+          </button>
+          <button
+            type="button"
+            className={`top-tab ${tab === "tree" ? "active" : ""}`}
+            onClick={() => setTab("tree")}
+          >
+            📂 Tree
+          </button>
+        </nav>
+
+        {/* Action Controls on Header Right */}
+        <div className="viz-top-right">
+          <button
+            type="button"
+            className="top-btn chat-btn"
+            onClick={() => setIsChatOpen((prev) => !prev)}
+          >
+            💬 AI Assistant
+          </button>
+          <button
+            type="button"
+            className="top-btn regen-btn"
+            onClick={onRegen}
+            disabled={regen}
+          >
+            {regen ? "🤖 Analyzing…" : "🔄 Re-analyze"}
+          </button>
+          <Link to="/" className="top-btn upload-btn">
+            + Upload New
+          </Link>
+        </div>
+      </header>
+
+      {/* 2. MAIN WORKSPACE: Left Sidebar + Center Canvas */}
+      <div className="viz-workspace">
+        {/* Left Sidebar: APIs & Features list */}
+        {tab === "flows" && features.length > 0 && (
+          <aside className="viz-left-sidebar">
+            <FeatureSidebar
+              features={features}
+              activeId={activeFeatureId}
+              onSelect={setActiveFeatureId}
             />
-          </div>
-        ) : snap && tab === "system" ? (
-          <div className="viz-panel-main sysdesign-main">
-            <SystemDesignPanel metadata={metadata} />
-          </div>
-        ) : (
-          <div className="viz-empty">
-            {loading ? "🤖 DeepAgents analyzing your project…" : error || "No architecture yet"}
-          </div>
+          </aside>
         )}
+
+        {/* Center Canvas Area */}
+        <main className={`viz-canvas-area ${tab === "flows" ? "has-sidebar" : "full-width"}`}>
+          {tab === "flows" ? (
+            <FeatureFlowDiagram
+              featureFlows={featureFlows}
+              activeFeatureId={activeFeatureId}
+              onHoverInsight={setHoveredInsight}
+            />
+          ) : snap && tab === "system" ? (
+            <div className="viz-panel-main sysdesign-main">
+              <SystemDesignPanel metadata={metadata} />
+            </div>
+          ) : snap && tab === "classes" ? (
+            <div className="viz-panel-main diagram-main">
+              <ClassDiagram
+                components={snap.data.components}
+                graph={graph}
+                selectedId={selectedId}
+                onSelect={setSelectedId}
+              />
+            </div>
+          ) : snap && tab === "tree" ? (
+            <div className="viz-panel-main">
+              <ProjectTree files={files} />
+            </div>
+          ) : (
+            <div className="viz-empty">
+              {loading ? "🤖 DeepAgents analyzing your project…" : error || "No architecture yet"}
+            </div>
+          )}
+        </main>
       </div>
 
-      <aside className="viz-chrome">
-        <Link to="/" className="brand-mini">
-          HOVER
-        </Link>
-        {snap && (
-          <>
-            <h1>{snap.data.project_name}</h1>
-            <p className="summary">{snap.data.summary}</p>
+      {/* 3. BOTTOM INSIGHT INSPECTOR: Animates up from bottom without overlapping nodes */}
+      <BottomInsightBar
+        insight={hoveredInsight}
+        onClose={() => setHoveredInsight(null)}
+      />
 
-            <div className="tab-row">
-              {(
-                [
-                  ["flows", "⚡ Flows"],
-                  ["scene", "3D Map"],
-                  ["system", "System"],
-                  ["classes", "Classes"],
-                  ["tree", "Tree"],
-                ] as const
-              ).map(([key, label]) => (
-                <button
-                  key={key}
-                  type="button"
-                  className={tab === key ? "tab active" : "tab"}
-                  onClick={() => setTab(key)}
-                >
-                  {label}
-                </button>
-              ))}
-            </div>
-
-            {tab === "flows" && (
-              <>
-                <p className="hint-click">
-                  Select a feature to see its flow. Hover arrows for insights.
-                </p>
-                {activeFeatureId && (
-                  <div className="flow-detail">
-                    <span className="label">Active feature</span>
-                    <p>{features.find((f) => f.id === activeFeatureId)?.description}</p>
-                  </div>
-                )}
-              </>
-            )}
-
-            {tab === "scene" && (
-              <>
-                <p className="hint-click">
-                  Tap a node for details. Gold = story flows · Teal = same links as Classes tab
-                </p>
-                <div className="flow-picker">
-                  <span className="label">Highlight flow</span>
-                  {snap.data.flows.map((f) => (
-                    <button
-                      key={f.id}
-                      className={activeFlowId === f.id ? "flow active" : "flow"}
-                      onClick={() => setActiveFlowId(f.id)}
-                    >
-                      {f.label}
-                    </button>
-                  ))}
-                  <button
-                    className={activeFlowId === null ? "flow active" : "flow"}
-                    onClick={() => setActiveFlowId(null)}
-                  >
-                    All traffic
-                  </button>
-                </div>
-                {activeFlow && (
-                  <div className="flow-detail">
-                    <span className="label">What this flow does</span>
-                    <p>{describeFlow(activeFlow, snap.data.components)}</p>
-                  </div>
-                )}
-              </>
-            )}
-
-            <button className="chat-trigger-btn" onClick={() => setIsChatOpen(true)}>
-              💬 Ask AI Assistant (Chatbot)
-            </button>
-            <button className="regen" onClick={onRegen} disabled={regen}>
-              {regen ? "🤖 Agents working…" : "🔄 Re-analyze"}
-            </button>
-            <p className="meta">
-              v{snap.version} · {files.length} files · {features.length} features
-            </p>
-          </>
-        )}
-        {error && !snap && <p className="error">{error}</p>}
-      </aside>
-
-      {/* Floating Chatbot Action Button */}
-      {id && (
-        <button
-          type="button"
-          className="chat-floating-btn"
-          onClick={() => setIsChatOpen((prev) => !prev)}
-          title="Chat with Codebase"
-        >
-          <span>💬</span>
-          <span className="chat-floating-label">Ask Codebase AI</span>
-        </button>
-      )}
-
-      {/* Interactive Codebase Chatbot Modal */}
+      {/* 4. CHATBOT MODAL & FLOATING TRIGGER */}
       {id && (
         <CodebaseChatbot
           projectId={id}
@@ -276,6 +235,7 @@ export function VisualizePage() {
         />
       )}
 
+      {/* Node Inspector Drawer */}
       {selected && snap && (
         <aside className="viz-inspector">
           <NodeInspector
@@ -288,4 +248,3 @@ export function VisualizePage() {
     </div>
   );
 }
-

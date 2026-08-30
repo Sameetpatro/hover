@@ -254,6 +254,11 @@ export const api = {
       body: JSON.stringify({ message }),
     }),
 
+  resetAllProjects: () =>
+    call<{ status: string; message: string }>("/projects/reset/", {
+      method: "POST",
+    }),
+
   clearChatHistory: (projectId: string) =>
     call<{ message: string }>(`/projects/${projectId}/chat/`, {
       method: "DELETE",

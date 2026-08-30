@@ -17,7 +17,6 @@ from app.config import get_settings
 
 
 def _hash_embed(text: str, dim: int) -> list[float]:
-    """Local fake embedding when no OpenRouter key is set."""
     vec = [0.0] * dim
     tokens = text.lower().split() or ["empty"]
     for tok in tokens:
@@ -47,6 +46,7 @@ def get_chat_llm() -> ChatOpenAI | None:
         api_key=settings.openrouter_api_key,
         base_url=settings.openrouter_base_url,
         temperature=0.2,
+        max_tokens=2048,
         default_headers={
             "HTTP-Referer": settings.openrouter_http_referer,
             "X-Title": settings.openrouter_app_title,
@@ -165,18 +165,21 @@ HEURISTIC DRAFT:
 RETRIEVED CODE:
 {context[:12000]}
 """
-    msg = llm.invoke(
-        [
-            SystemMessage(content="You output only valid JSON."),
-            HumanMessage(content=prompt),
-        ]
-    )
-    content = msg.content if isinstance(msg.content, str) else str(msg.content)
-    data = extract_json(content)
-    if not data or "components" not in data or "layers" not in data:
+    try:
+        msg = llm.invoke(
+            [
+                SystemMessage(content="You output only valid JSON."),
+                HumanMessage(content=prompt),
+            ]
+        )
+        content = msg.content if isinstance(msg.content, str) else str(msg.content)
+        data = extract_json(content)
+        if not data or "components" not in data or "layers" not in data:
+            return None
+        data.setdefault("project_name", project_name)
+        data.setdefault("flows", heuristic.get("flows", []))
+        data.setdefault("entrypoints", heuristic.get("entrypoints", []))
+        data.setdefault("data_stores", heuristic.get("data_stores", []))
+        return data
+    except Exception:
         return None
-    data.setdefault("project_name", project_name)
-    data.setdefault("flows", heuristic.get("flows", []))
-    data.setdefault("entrypoints", heuristic.get("entrypoints", []))
-    data.setdefault("data_stores", heuristic.get("data_stores", []))
-    return data

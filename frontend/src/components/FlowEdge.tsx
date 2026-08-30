@@ -95,17 +95,21 @@ export function FlowEdge(props: EdgeProps) {
         onMouseLeave={onMouseLeave}
         style={{ overflow: "visible", pointerEvents: "all", cursor: "pointer" }}
       >
-        <div style={{
-          fontSize: "9px",
-          fontWeight: 600,
-          color: isActive ? "#f8fafc" : "#94a3b8",
-          textAlign: "center",
-          padding: "2px 6px",
-          background: isActive ? "rgba(15,23,42,0.9)" : "transparent",
-          borderRadius: "4px",
-          whiteSpace: "nowrap",
-          transition: "all 0.2s ease",
-        }}>
+        <div
+          style={{
+            fontSize: "9px",
+            fontWeight: 600,
+            color: isActive ? "#f8fafc" : "#94a3b8",
+            textAlign: "center",
+            padding: "2px 6px",
+            background: isActive ? "rgba(15,23,42,0.95)" : "rgba(15,23,42,0.6)",
+            border: isActive ? `1px solid ${color}80` : "1px solid rgba(148,163,184,0.15)",
+            borderRadius: "4px",
+            whiteSpace: "nowrap",
+            transition: "all 0.2s ease",
+            backdropFilter: "blur(4px)",
+          }}
+        >
           {payload?.label || ""}
           {isConditional && (
             <span style={{ color: "#fbbf24", marginLeft: "4px", fontSize: "8px" }}>
@@ -114,59 +118,6 @@ export function FlowEdge(props: EdgeProps) {
           )}
         </div>
       </foreignObject>
-
-      {/* Hover tooltip with insights */}
-      {hovered && payload?.insight && (
-        <foreignObject
-          x={labelX - 150}
-          y={labelY + 16}
-          width={300}
-          height={200}
-          style={{ overflow: "visible", pointerEvents: "none" }}
-        >
-          <div style={{
-            background: "rgba(15,23,42,0.95)",
-            border: "1px solid rgba(148,163,184,0.3)",
-            borderRadius: "10px",
-            padding: "12px 16px",
-            boxShadow: "0 8px 32px rgba(0,0,0,0.5)",
-            backdropFilter: "blur(12px)",
-            color: "#e2e8f0",
-            fontSize: "11px",
-            lineHeight: 1.5,
-            maxWidth: "280px",
-          }}>
-            <div style={{ fontWeight: 700, marginBottom: "6px", color: color }}>
-              {payload.label}: {payload.edgeData}
-            </div>
-            <div style={{ marginBottom: "6px" }}>{payload.insight}</div>
-            {payload.pattern && (
-              <div style={{
-                display: "inline-block",
-                background: "rgba(167,139,250,0.2)",
-                color: "#c4b5fd",
-                padding: "2px 8px",
-                borderRadius: "4px",
-                fontSize: "9px",
-                fontWeight: 600,
-                marginBottom: "4px",
-              }}>
-                🔷 {payload.pattern}
-              </div>
-            )}
-            {payload.performanceNote && (
-              <div style={{ color: "#fbbf24", fontSize: "10px", marginTop: "4px" }}>
-                ⚡ {payload.performanceNote}
-              </div>
-            )}
-            {payload.securityNote && (
-              <div style={{ color: "#fb7185", fontSize: "10px", marginTop: "2px" }}>
-                🔒 {payload.securityNote}
-              </div>
-            )}
-          </div>
-        </foreignObject>
-      )}
     </>
   );
 }
