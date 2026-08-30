@@ -92,6 +92,77 @@ export type SymbolRow = {
   signature: string;
 };
 
+// ---- DeepAgents types ----
+
+export type FeatureItem = {
+  id: string;
+  feature_key: string;
+  name: string;
+  description: string;
+  method: string;
+  path: string;
+  entry_file: string;
+  entry_function: string;
+  category: string;
+  color: string;
+};
+
+export type FlowNodeData = {
+  id: string;
+  type: "user" | "server" | "api" | "service" | "cache" | "database" | "queue" | "worker" | "external";
+  label: string;
+  metadata?: Record<string, unknown>;
+};
+
+export type FlowEdgeData = {
+  from: string;
+  to: string;
+  label: string;
+  data: string;
+  condition?: string;
+  insights?: string;
+};
+
+export type FlowInsight = {
+  feature_id: string;
+  from: string;
+  to: string;
+  insight: string;
+  pattern: string | null;
+  performance_note: string | null;
+  security_note: string | null;
+};
+
+export type FeatureFlowData = {
+  nodes: FlowNodeData[];
+  edges: FlowEdgeData[];
+  insights: FlowInsight[];
+};
+
+export type FeatureWithFlow = {
+  feature: FeatureItem;
+  flow: FeatureFlowData | null;
+};
+
+export type TechItem = {
+  name: string;
+  category: string;
+  icon: string;
+};
+
+export type PatternItem = {
+  name: string;
+  description: string;
+};
+
+export type ProjectMetadata = {
+  tech_stack: TechItem[];
+  system_design: string;
+  patterns: PatternItem[];
+  db_schema: Record<string, unknown>[];
+  profile: Record<string, unknown>;
+};
+
 // Local: Vite proxies /api → backend. Production (Vercel): set VITE_API_BASE to the Render URL.
 const API_ORIGIN = (import.meta.env.VITE_API_BASE as string | undefined)?.replace(/\/$/, "") ?? "";
 const BASE = API_ORIGIN ? `${API_ORIGIN}/api` : "/api";
@@ -156,4 +227,46 @@ export const api = {
     call<ArchitectureSnapshot>(`/projects/${projectId}/architecture/generate/`, {
       method: "POST",
     }),
+
+  // ---- DeepAgents API ----
+
+  getFeatures: (projectId: string) =>
+    call<FeatureItem[]>(`/projects/${projectId}/features/`),
+
+  getFeatureFlow: (projectId: string, featureId: string) =>
+    call<FeatureFlowData>(`/projects/${projectId}/features/${featureId}/flow/`),
+
+  getAllFlows: (projectId: string) =>
+    call<FeatureWithFlow[]>(`/projects/${projectId}/features/flows/`),
+
+  getMetadata: (projectId: string) =>
+    call<ProjectMetadata>(`/projects/${projectId}/metadata/`),
+
+  // ---- Codebase Chatbot API ----
+
+  getChatHistory: (projectId: string) =>
+    call<ChatMessage[]>(`/projects/${projectId}/chat/`),
+
+  sendChatMessage: (projectId: string, message: string) =>
+    call<ChatMessage>(`/projects/${projectId}/chat/`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ message }),
+    }),
+
+  clearChatHistory: (projectId: string) =>
+    call<{ message: string }>(`/projects/${projectId}/chat/`, {
+      method: "DELETE",
+    }),
 };
+
+export type ChatMessage = {
+  id: string;
+  project_id: string;
+  role: "user" | "assistant";
+  content: string;
+  sources?: { file: string; symbol?: string }[];
+  created_at: string;
+};
+
+

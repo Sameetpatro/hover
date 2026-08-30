@@ -14,8 +14,11 @@ from app.db import (
     ArchitectureSnapshot,
     DependencyEdge,
     DependencyNode,
+    Feature,
+    FeatureFlow,
     Project,
     ProjectFile,
+    ProjectMeta,
     Symbol,
     Upload,
     get_db,
@@ -259,3 +262,144 @@ def regenerate_architecture(project_id: str, db: Session = Depends(get_db)):
         data=json.loads(snap.data_json),
         created_at=snap.created_at,
     )
+
+
+# ---- DeepAgents endpoints ----
+
+
+@router.get("/projects/{project_id}/features/")
+def list_features(project_id: str, db: Session = Depends(get_db)):
+    """List all features discovered by the Feature Agent."""
+    features = (
+        db.query(Feature)
+        .filter(Feature.project_id == project_id)
+        .order_by(Feature.created_at)
+        .all()
+    )
+    return [
+        {
+            "id": f.id,
+            "feature_key": f.feature_key,
+            "name": f.name,
+            "description": f.description,
+            "method": f.method,
+            "path": f.path,
+            "entry_file": f.entry_file,
+            "entry_function": f.entry_function,
+            "category": f.category,
+            "color": f.color,
+        }
+        for f in features
+    ]
+
+
+@router.get("/projects/{project_id}/features/{feature_id}/flow/")
+def get_feature_flow(project_id: str, feature_id: str, db: Session = Depends(get_db)):
+    """Get the complete flow graph + insights for a feature."""
+    flow = (
+        db.query(FeatureFlow)
+        .filter(FeatureFlow.project_id == project_id, FeatureFlow.feature_id == feature_id)
+        .first()
+    )
+    if not flow:
+        raise HTTPException(404, "Flow not found")
+    return {
+        "id": flow.id,
+        "feature_id": flow.feature_id,
+        "nodes": json.loads(flow.nodes_json),
+        "edges": json.loads(flow.edges_json),
+        "insights": json.loads(flow.insights_json),
+    }
+
+
+@router.get("/projects/{project_id}/features/flows/")
+def get_all_flows(project_id: str, db: Session = Depends(get_db)):
+    """Get all feature flows for a project in one call."""
+    features = (
+        db.query(Feature)
+        .filter(Feature.project_id == project_id)
+        .order_by(Feature.created_at)
+        .all()
+    )
+    flows = (
+        db.query(FeatureFlow)
+        .filter(FeatureFlow.project_id == project_id)
+        .all()
+    )
+    flow_map = {f.feature_id: f for f in flows}
+    result = []
+    for feat in features:
+        fl = flow_map.get(feat.id)
+        result.append({
+            "feature": {
+                "id": feat.id,
+                "feature_key": feat.feature_key,
+                "name": feat.name,
+                "description": feat.description,
+                "method": feat.method,
+                "path": feat.path,
+                "color": feat.color,
+                "category": feat.category,
+            },
+            "flow": {
+                "nodes": json.loads(fl.nodes_json) if fl else [],
+                "edges": json.loads(fl.edges_json) if fl else [],
+                "insights": json.loads(fl.insights_json) if fl else [],
+            } if fl else None,
+        })
+    return result
+
+
+@router.get("/projects/{project_id}/metadata/")
+def get_project_metadata(project_id: str, db: Session = Depends(get_db)):
+    """Get tech stack, system design, and structural metadata."""
+    meta = (
+        db.query(ProjectMeta)
+        .filter(ProjectMeta.project_id == project_id)
+        .order_by(ProjectMeta.created_at.desc())
+        .first()
+    )
+    if not meta:
+        return {
+            "tech_stack": [],
+            "system_design": "",
+            "patterns": [],
+            "db_schema": [],
+            "profile": {},
+        }
+    return {
+        "tech_stack": json.loads(meta.tech_stack_json),
+        "system_design": meta.system_design,
+        "patterns": json.loads(meta.patterns_json),
+        "db_schema": json.loads(meta.db_schema_json),
+        "profile": json.loads(meta.profile_json),
+    }
+
+
+# ---- Codebase Chatbot with Memory ----
+
+from app.schemas import ChatMessageIn, ChatMessageOut
+from app.services.chat import answer_project_query, clear_conversation_history, get_conversation_history
+
+
+@router.get("/projects/{project_id}/chat/", response_model=list[ChatMessageOut])
+def get_chat_history(project_id: str, db: Session = Depends(get_db)):
+    """Get previous chat messages for this project."""
+    return get_conversation_history(db, project_id)
+
+
+@router.post("/projects/{project_id}/chat/", response_model=ChatMessageOut)
+def send_chat_message(project_id: str, body: ChatMessageIn, db: Session = Depends(get_db)):
+    """Send a query to the Codebase AI Assistant (with tool use and conversation memory)."""
+    try:
+        return answer_project_query(db, project_id, body.message)
+    except Exception as e:
+        raise HTTPException(500, f"Chat processing failed: {str(e)}")
+
+
+@router.delete("/projects/{project_id}/chat/")
+def delete_chat_history(project_id: str, db: Session = Depends(get_db)):
+    """Clear conversation history memory for this project."""
+    clear_conversation_history(db, project_id)
+    return {"message": "Chat history cleared"}
+

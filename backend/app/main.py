@@ -1,5 +1,3 @@
-"""Hover FastAPI app — Python + LangChain backend."""
-
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Response

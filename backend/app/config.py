@@ -27,8 +27,8 @@ class Settings(BaseSettings):
     database_url: str = ""
 
     redis_url: str = "redis://localhost:6379/0"
-    media_root: str = str(ROOT / "backend" / "media")
-    extract_root: str = str(ROOT / "backend" / "extracted")
+    media_root: str = str(ROOT / ".media")
+    extract_root: str = str(ROOT / ".extracted")
 
     aws_access_key_id: str = "minioadmin"
     aws_secret_access_key: str = "minioadmin"

@@ -135,6 +135,67 @@ class ArchitectureSnapshot(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
+class Feature(Base):
+    """Individual feature discovered by the DeepAgents Feature Agent."""
+
+    __tablename__ = "features"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    project_id: Mapped[str] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"))
+    feature_key: Mapped[str] = mapped_column(String(64), default="")
+    name: Mapped[str] = mapped_column(String(255))
+    description: Mapped[str] = mapped_column(Text, default="")
+    method: Mapped[str] = mapped_column(String(16), default="")
+    path: Mapped[str] = mapped_column(String(1024), default="")
+    entry_file: Mapped[str] = mapped_column(String(1024), default="")
+    entry_function: Mapped[str] = mapped_column(String(255), default="")
+    category: Mapped[str] = mapped_column(String(128), default="general")
+    color: Mapped[str] = mapped_column(String(16), default="#60a5fa")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class FeatureFlow(Base):
+    """Complete flow graph for a feature — nodes + edges + insights."""
+
+    __tablename__ = "feature_flows"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    project_id: Mapped[str] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"))
+    feature_id: Mapped[str] = mapped_column(ForeignKey("features.id", ondelete="CASCADE"))
+    nodes_json: Mapped[str] = mapped_column(Text, default="[]")
+    edges_json: Mapped[str] = mapped_column(Text, default="[]")
+    insights_json: Mapped[str] = mapped_column(Text, default="[]")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class ProjectMeta(Base):
+    """Tech stack, system design, and structural metadata."""
+
+    __tablename__ = "project_metadata"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    project_id: Mapped[str] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"))
+    profile_json: Mapped[str] = mapped_column(Text, default="{}")
+    tech_stack_json: Mapped[str] = mapped_column(Text, default="[]")
+    system_design: Mapped[str] = mapped_column(Text, default="")
+    patterns_json: Mapped[str] = mapped_column(Text, default="[]")
+    db_schema_json: Mapped[str] = mapped_column(Text, default="[]")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class ProjectChatMessage(Base):
+    """Chat message history with memory for codebase Q&A."""
+
+    __tablename__ = "project_chat_messages"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    project_id: Mapped[str] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"))
+    role: Mapped[str] = mapped_column(String(16))  # "user" | "assistant"
+    content: Mapped[str] = mapped_column(Text)
+    sources_json: Mapped[str] = mapped_column(Text, default="[]")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
 settings = get_settings()
 connect_args = {"check_same_thread": False} if settings.use_sqlite else {}
 engine = create_engine(settings.sqlalchemy_url, connect_args=connect_args)

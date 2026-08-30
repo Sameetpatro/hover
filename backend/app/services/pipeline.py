@@ -17,8 +17,11 @@ from app.db import (
     CodeChunk,
     DependencyEdge,
     DependencyNode,
+    Feature,
+    FeatureFlow,
     Project,
     ProjectFile,
+    ProjectMeta,
     SessionLocal,
     Symbol,
     Upload,
@@ -242,8 +245,8 @@ def run_pipeline(job_id: str) -> None:
             )
         db.commit()
 
-        _update_job(db, job, stage="indexed", progress=0.85)
-        _update_job(db, job, stage="generating", progress=0.9)
+        _update_job(db, job, stage="indexed", progress=0.45)
+        _update_job(db, job, stage="generating", progress=0.48)
 
         files = db.query(ProjectFile).filter(ProjectFile.project_id == project.id).all()
         symbols = db.query(Symbol).filter(Symbol.project_id == project.id).all()
@@ -269,6 +272,124 @@ def run_pipeline(job_id: str) -> None:
         )
         db.commit()
 
+        # ---- DeepAgents multi-agent pipeline ----
+        _update_job(db, job, stage="scouting", progress=0.50)
+
+        # Prepare data for the agent graph
+        files_data = [
+            {
+                "path": f.path,
+                "language": f.language,
+                "role": f.role,
+                "loc": f.loc,
+                "size_bytes": f.size_bytes,
+            }
+            for f in files
+        ]
+        symbols_data = [
+            {
+                "name": s.name,
+                "kind": s.kind,
+                "file_path": s.file_path,
+                "signature": s.signature,
+                "start_line": s.start_line,
+                "end_line": s.end_line,
+            }
+            for s in symbols
+        ]
+        chunk_data = [
+            {
+                "content": c.content,
+                "file_path": c.file_path,
+                "symbol_name": c.symbol_name,
+                "embedding": c.embedding_json,
+            }
+            for c in chunks
+        ]
+
+        def progress_cb(stage: str, progress: float) -> None:
+            _update_job(db, job, stage=stage, progress=progress)
+
+        try:
+            from app.services.agents.orchestrator import run_deep_analysis
+
+            agent_result = run_deep_analysis(
+                project_id=project.id,
+                project_name=project.name,
+                project_root=str(root),
+                files=files_data,
+                symbols=symbols_data,
+                edges=edges_data,
+                chunk_rows=chunk_data,
+                on_progress=progress_cb,
+            )
+
+            # Store features
+            _update_job(db, job, stage="storing", progress=0.92)
+            db.query(FeatureFlow).filter(FeatureFlow.project_id == project.id).delete()
+            db.query(Feature).filter(Feature.project_id == project.id).delete()
+            db.query(ProjectMeta).filter(ProjectMeta.project_id == project.id).delete()
+            db.commit()
+
+            feature_map: dict[str, str] = {}  # agent feat id -> db Feature id
+            for feat in agent_result.get("features", []):
+                db_feat = Feature(
+                    project_id=project.id,
+                    feature_key=feat.get("id", ""),
+                    name=feat.get("name", ""),
+                    description=feat.get("description", ""),
+                    method=feat.get("method", ""),
+                    path=feat.get("path", ""),
+                    entry_file=feat.get("entry_file", ""),
+                    entry_function=feat.get("entry_function", ""),
+                    category=feat.get("category", "general"),
+                    color=feat.get("color", "#60a5fa"),
+                )
+                db.add(db_feat)
+                db.flush()
+                feature_map[feat.get("id", "")] = db_feat.id
+
+            # Store feature flows with insights
+            insights_by_feat: dict[str, list] = {}
+            for ins in agent_result.get("insights", []):
+                fid = ins.get("feature_id", "")
+                insights_by_feat.setdefault(fid, []).append(ins)
+
+            for flow in agent_result.get("feature_flows", []):
+                agent_feat_id = flow.get("feature_id", "")
+                db_feat_id = feature_map.get(agent_feat_id, "")
+                if not db_feat_id:
+                    continue
+                flow_insights = insights_by_feat.get(agent_feat_id, [])
+                db.add(
+                    FeatureFlow(
+                        project_id=project.id,
+                        feature_id=db_feat_id,
+                        nodes_json=json.dumps(flow.get("nodes", [])),
+                        edges_json=json.dumps(flow.get("edges", [])),
+                        insights_json=json.dumps(flow_insights),
+                    )
+                )
+
+            # Store metadata
+            metadata = agent_result.get("metadata", {})
+            profile = agent_result.get("profile", {})
+            db.add(
+                ProjectMeta(
+                    project_id=project.id,
+                    profile_json=json.dumps(profile),
+                    tech_stack_json=json.dumps(metadata.get("tech_stack", [])),
+                    system_design=metadata.get("system_design", ""),
+                    patterns_json=json.dumps(metadata.get("patterns", [])),
+                    db_schema_json=json.dumps(metadata.get("db_schema", [])),
+                )
+            )
+            db.commit()
+            logger.info("DeepAgents results stored for project %s", project.id)
+        except Exception as agent_exc:
+            logger.exception("DeepAgents pipeline failed (non-fatal): %s", agent_exc)
+            # Agent failure is non-fatal — the basic architecture is already saved
+
         _update_job(db, job, stage="ready", progress=1.0, status="succeeded")
     except Exception as exc:
         logger.exception("pipeline failed for %s", job_id)
@@ -277,3 +398,4 @@ def run_pipeline(job_id: str) -> None:
             _update_job(db, job, stage="failed", progress=1.0, status="failed", error=str(exc))
     finally:
         db.close()
+

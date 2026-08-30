@@ -10,8 +10,10 @@ const STAGES = [
   "analyzing",
   "chunking",
   "embedding",
-  "indexed",
-  "generating",
+  "scouting",
+  "discovering",
+  "tracing",
+  "enriching",
   "ready",
 ];
 

@@ -2,9 +2,12 @@
 __pycache__/
 *.py[cod]
 *.sqlite3
+*.db
 .env
 .env.local
 .env.render
+.extracted/
+.media/
 backend/media/
 backend/extracted/
 backend/hover.db
@@ -14,7 +17,6 @@ frontend/dist/
 .DS_Store
 *.egg-info/
 .pytest_cache/
-
 
 docs/
 fixtures/
